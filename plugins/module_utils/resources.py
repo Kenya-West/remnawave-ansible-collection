@@ -122,17 +122,33 @@ def list_hosts(client):
     return client.get('/api/hosts') or []
 
 
-def find_host(client, remark_or_uuid, required=False):
+def find_hosts_by(client, value, key='remark'):
+    """All hosts whose ``key`` (or uuid) equals ``value``.
+
+    ``key`` is the identifier the caller addresses hosts by: ``remark`` or
+    ``address``. A UUID always wins over either.
+    """
     hosts = list_hosts(client)
-    key = 'uuid' if is_uuid(remark_or_uuid) else 'remark'
-    matches = [h for h in hosts if h.get(key) == remark_or_uuid]
+    lookup = 'uuid' if is_uuid(value) else key
+    return [h for h in hosts if h.get(lookup) == value]
+
+
+def find_host(client, value, key='remark', required=False):
+    """The single host identified by ``value``; fails on ambiguity.
+
+    Remarks are unique in practice; addresses are not, since one domain can
+    serve several inbounds or ports. Rather than picking one arbitrarily,
+    an ambiguous identifier is an error; host_info lists the candidates.
+    """
+    matches = find_hosts_by(client, value, key=key)
     if len(matches) > 1:
         raise RemnawaveApiError(
-            'Multiple hosts share the remark %r; remarks used with this '
-            'collection must be unique' % remark_or_uuid)
+            'Multiple hosts share the %s %r (remarks: %s); identify the host '
+            'you mean by remark, or give each of them its own address'
+            % (key, value, ', '.join(sorted(repr(h.get('remark')) for h in matches))))
     if not matches:
         if required:
-            raise RemnawaveApiError('Host %r not found' % remark_or_uuid)
+            raise RemnawaveApiError('Host with %s %r not found' % (key, value))
         return None
     return matches[0]
 

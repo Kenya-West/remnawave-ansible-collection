@@ -58,7 +58,8 @@
 
     - name: Manage hosts
       kenyawest.remnawave.host:
-        remark: "{{ item.remark }}"
+        identify_by: "{{ item.identify_by | default('remark') }}"
+        remark: "{{ item.remark | default(omit) }}"
         state: "{{ item.state | default('present') }}"
         nodes: "{{ item.nodes | default(omit) }}"
         config_profile: "{{ item.config_profile | default(omit) }}"
@@ -76,7 +77,7 @@
         server_description: "{{ item.server_description | default(omit) }}"
       loop: "{{ remnawave_hosts }}"
       loop_control:
-        label: "{{ item.remark }}"
+        label: "{{ item.remark | default(item.address) }}"
 
     - name: Manage users
       kenyawest.remnawave.user:

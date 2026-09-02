@@ -53,7 +53,7 @@ only the Python standard library.
 | --- | --- |
 | `user`, `user_info` | Panel users: expiration, traffic limits, squad membership, enable/disable |
 | `node`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, cascade onto linked hosts |
-| `host`, `host_info` | Subscription hosts: address, SNI, transport parameters, node binding, visibility |
+| `host`, `host_info` | Subscription hosts: address, SNI, transport parameters, node binding, visibility. Addressable by remark or by domain (`identify_by`) |
 | `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative) |
 | `internal_squad`, `internal_squad_info` | Internal squads and their inbounds |
 | `external_squad`, `external_squad_info` | External squads |
@@ -83,6 +83,54 @@ no enabled/disabled concept and accept `present`/`absent` only.
 For users, the panel derives `LIMITED` (over quota) and `EXPIRED` itself.
 `state: enabled` treats those as already satisfied rather than forcing them
 back to `ACTIVE`, which the panel would undo on its next pass.
+
+### Addressing hosts by domain
+
+Hosts are identified by their `remark` by default. When your data is keyed by
+domain rather than by display name - a list of domains to publish, a list to
+retire - set `identify_by: address` and skip inventing remarks; a host created
+this way takes its address as its remark.
+
+```yaml
+# Publish one host per domain, on an existing node
+- kenyawest.remnawave.host:
+    identify_by: address
+    address: "{{ item }}"
+    sni: "{{ item }}"
+    state: enabled
+    config_profile: default-profile
+    inbound: vless-reality
+    port: 443
+    nodes: [nl-ams-1]
+  loop: "{{ host_domains }}"
+
+# Retire some of them later, by the same domains
+- kenyawest.remnawave.host:
+    identify_by: address
+    address: "{{ item }}"
+    state: disabled
+  loop: "{{ retired_domains }}"
+```
+
+With `identify_by: address`, `remark` becomes an ordinary managed field, so it
+can be used to rename a host found by its domain.
+
+An address is not unique in Remnawave - one domain can serve several inbounds
+or ports - and the module refuses an ambiguous address rather than picking one,
+naming the candidates. `host_info` has no such scruple and returns every match,
+which is the way to act on all of them:
+
+```yaml
+- kenyawest.remnawave.host_info:
+    address: "{{ item }}"
+  loop: "{{ retired_domains }}"
+  register: matched
+
+- kenyawest.remnawave.host:
+    remark: "{{ item.remark }}"
+    state: disabled
+  loop: "{{ matched.results | map(attribute='hosts') | flatten }}"
+```
 
 ### Decommissioning a node with its hosts
 
@@ -137,7 +185,8 @@ The `remnawave` role applies a whole desired state described by variables
 (`remnawave_users`, `remnawave_nodes`, `remnawave_hosts`,
 `remnawave_config_profiles`, `remnawave_internal_squads`,
 `remnawave_external_squads`, `remnawave_subscription_settings`) in dependency
-order. See `roles/remnawave/README.md`.
+order, with usage, per-entry option tables and worked examples in
+[roles/remnawave/README.md](roles/remnawave/README.md).
 
 ## Installation
 

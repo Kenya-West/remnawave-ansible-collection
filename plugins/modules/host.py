@@ -13,8 +13,11 @@ short_description: Manage Remnawave subscription hosts
 description:
   - Create, update, enable, disable and delete hosts (subscription entries)
     of a Remnawave panel in a declarative way.
-  - Hosts are identified by their C(remark), which therefore must be unique
-    among your hosts; the module fails if several hosts share a remark.
+  - Hosts are identified by their C(remark) by default, or by their
+    C(address) when O(identify_by=address) - useful when the domain, not the
+    display name, is what your data is keyed by.
+  - Whichever identifier is used must match at most one host; the module
+    fails rather than guessing when several hosts share it.
   - The inbound is referenced by config profile name and inbound tag and
     resolved to UUIDs automatically.
   - Advanced host properties not covered by this module (mux, sockopt,
@@ -33,12 +36,28 @@ attributes:
       - Returns what changed (or would change) when run with C(--diff).
     support: full
 options:
+  identify_by:
+    description:
+      - Which option identifies the host on the panel.
+      - V(remark) (the default) searches by O(remark), the host's display
+        name.
+      - V(address) searches by O(address) instead, so playbooks driven by a
+        list of domains need not invent remarks. O(remark) then becomes an
+        ordinary managed field and may be used to rename the host.
+      - The identifying option must match at most one host. Addresses are not
+        unique in Remnawave - one domain can serve several inbounds or ports -
+        so the module fails on ambiguity instead of picking one.
+    type: str
+    choices: [remark, address]
+    default: remark
   remark:
     description:
-      - Remark (display name) of the host. This is the stable identifier the
-        module searches by; it cannot be changed through this module.
+      - Remark (display name) of the host.
+      - Required and used as the identifier unless O(identify_by=address);
+        it cannot be changed while it is the identifier.
+      - With O(identify_by=address) it is optional. Set, it renames the host.
+        Omitted, a newly created host gets its address as its remark.
     type: str
-    required: true
   state:
     description:
       - V(present) ensures the host exists and leaves its enabled/disabled
@@ -69,8 +88,9 @@ options:
     type: str
   address:
     description:
-      - Address advertised to clients.
-      - Required when the host does not exist yet.
+      - Address (domain or IP) advertised to clients.
+      - Required when the host does not exist yet, and always required with
+        O(identify_by=address), where it is also the identifier.
     type: str
   port:
     description:
@@ -154,6 +174,27 @@ EXAMPLES = r'''
     token: "{{ remnawave_token }}"
     remark: Amsterdam
     state: absent
+
+- name: Create one host per domain, all sharing the same settings
+  kenyawest.remnawave.host:
+    identify_by: address
+    address: "{{ item }}"
+    sni: "{{ item }}"
+    state: enabled
+    config_profile: default-profile
+    inbound: vless-reality
+    port: 443
+    fingerprint: chrome
+    nodes:
+      - nl-ams-1
+  loop: "{{ host_domains }}"
+
+- name: Disable the hosts serving a list of domains
+  kenyawest.remnawave.host:
+    identify_by: address
+    address: "{{ item }}"
+    state: disabled
+  loop: "{{ retired_domains }}"
 '''
 
 RETURN = r'''
@@ -195,6 +236,11 @@ def build_fields(module, client):
     ]
     resolved = dict(params)
 
+    if params['identify_by'] != 'remark' and params['remark'] is not None:
+        # Not the identifier here, so it is an ordinary field and may be
+        # used to rename the host.
+        fields.append(FieldSpec('remark', 'remark'))
+
     wanted_enabled = desired_enabled(params['state'])
     if wanted_enabled is not None:
         # state enabled/disabled is just the isDisabled field for a host.
@@ -232,15 +278,20 @@ def build_fields(module, client):
 
 def run(module, client):
     params = module.params
-    remark = params['remark']
-    current = find_host(client, remark)
+    identify_by = params['identify_by']
+    identifier = params[identify_by]
+    if identifier is None:
+        module.fail_json(
+            msg='Option %s is required, because identify_by=%s makes it the '
+                'identifier of the host' % (identify_by, identify_by))
+    current = find_host(client, identifier, key=identify_by)
 
     if params['state'] == 'absent':
         if current is None:
             module.exit_json(changed=False)
         if not module.check_mode:
             client.delete('/api/hosts/%s' % current['uuid'])
-        exit_with_change(module, {'remark': remark}, {})
+        exit_with_change(module, {identify_by: identifier}, {})
 
     fields, resolved = build_fields(module, client)
     patch, before, after = build_patch(resolved, current, fields)
@@ -250,13 +301,18 @@ def run(module, client):
                    if params[opt] is None]
         if missing:
             module.fail_json(
-                msg='Creating host %r requires: %s' % (remark, ', '.join(missing)))
+                msg='Creating host %r requires: %s'
+                    % (identifier, ', '.join(missing)))
         payload = dict(patch)
-        payload['remark'] = remark
+        # The API always wants a remark; when hosts are addressed by domain
+        # and no remark is given, the domain is the obvious display name.
+        payload['remark'] = params['remark'] or params['address']
         if module.check_mode:
-            exit_with_change(module, {}, dict(after, remark=remark), host=payload)
+            exit_with_change(module, {},
+                             dict(after, remark=payload['remark']), host=payload)
         created = client.post('/api/hosts', payload)
-        exit_with_change(module, {}, dict(after, remark=remark), host=created)
+        exit_with_change(module, {},
+                         dict(after, remark=payload['remark']), host=created)
 
     if not patch:
         module.exit_json(changed=False, host=current)
@@ -272,7 +328,9 @@ def run(module, client):
 def main():
     argument_spec = remnawave_argument_spec()
     argument_spec.update(
-        remark=dict(type='str', required=True),
+        identify_by=dict(type='str', choices=['remark', 'address'],
+                         default='remark'),
+        remark=dict(type='str'),
         state=dict(type='str', choices=STATE_CHOICES, default='present'),
         nodes=dict(type='list', elements='str'),
         config_profile=dict(type='str'),
@@ -291,7 +349,12 @@ def main():
         tags=dict(type='list', elements='str'),
         server_description=dict(type='str'),
     )
-    module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
+    module = AnsibleModule(
+        argument_spec=argument_spec,
+        supports_check_mode=True,
+        required_if=[('identify_by', 'remark', ['remark']),
+                     ('identify_by', 'address', ['address'])],
+    )
 
     client = RemnawaveClient(module)
     try:

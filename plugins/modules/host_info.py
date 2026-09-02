@@ -11,7 +11,11 @@ DOCUMENTATION = r'''
 module: host_info
 short_description: Retrieve Remnawave hosts
 description:
-  - Retrieve one host by remark, or list all hosts of a Remnawave panel.
+  - Retrieve hosts of a Remnawave panel by remark or by address, or list all
+    of them.
+  - Looking hosts up by address is what turns a list of domains into the
+    hosts serving them; unlike M(kenyawest.remnawave.host), this module does
+    not mind an address that matches several hosts and returns all of them.
   - This module never changes anything and always returns C(changed=false).
 author: Kenya-West (@Kenya-West)
 extends_documentation_fragment:
@@ -29,7 +33,13 @@ options:
   remark:
     description:
       - Return only the host with this remark.
-      - When omitted, all hosts are returned.
+      - Mutually exclusive with O(address); when both are omitted, all hosts
+        are returned.
+    type: str
+  address:
+    description:
+      - Return only the hosts whose address is this domain or IP.
+      - Several hosts may share an address, so this may return more than one.
     type: str
 seealso:
   - module: kenyawest.remnawave.host
@@ -41,11 +51,27 @@ EXAMPLES = r'''
     panel_url: https://panel.example.com
     token: "{{ remnawave_token }}"
   register: result
+
+- name: Collect the hosts serving a list of domains
+  kenyawest.remnawave.host_info:
+    address: "{{ item }}"
+  loop: "{{ retired_domains }}"
+  register: matched
+
+- name: Disable every one of them, whatever its remark
+  kenyawest.remnawave.host:
+    remark: "{{ item.remark }}"
+    state: disabled
+  loop: "{{ matched.results | map(attribute='hosts') | flatten }}"
+  loop_control:
+    label: "{{ item.remark }}"
 '''
 
 RETURN = r'''
 hosts:
-  description: Matching hosts as returned by the Remnawave API (camelCase keys).
+  description:
+    - Matching hosts as returned by the Remnawave API (camelCase keys).
+    - Always a list, empty when nothing matched.
   type: list
   elements: dict
   returned: always
@@ -60,20 +86,28 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import 
     remnawave_argument_spec,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
-    find_host, list_hosts,
+    find_hosts_by, list_hosts,
 )
 
 
 def main():
     argument_spec = remnawave_argument_spec()
-    argument_spec.update(remark=dict(type='str'))
-    module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
+    argument_spec.update(
+        remark=dict(type='str'),
+        address=dict(type='str'),
+    )
+    module = AnsibleModule(
+        argument_spec=argument_spec,
+        supports_check_mode=True,
+        mutually_exclusive=[('remark', 'address')],
+    )
 
     client = RemnawaveClient(module)
     try:
         if module.params['remark']:
-            host = find_host(client, module.params['remark'])
-            hosts = [host] if host is not None else []
+            hosts = find_hosts_by(client, module.params['remark'], key='remark')
+        elif module.params['address']:
+            hosts = find_hosts_by(client, module.params['address'], key='address')
         else:
             hosts = list_hosts(client)
         module.exit_json(changed=False, hosts=hosts)

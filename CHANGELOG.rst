@@ -4,27 +4,34 @@ kenyawest.remnawave Release Notes
 
 .. contents:: Topics
 
+v0.1.1
+======
+
+Minor Changes
+-------------
+
+- docs - add contributing instructions
+- docs - add version bump instructions
+- python - migrate from pip to uv everywhere
+- tests - add tests
+
 v0.1.0
 ======
 
 Release Summary
 ---------------
 
-Initial release. Developed and tested against the Remnawave API
-specification v3.4.3, including a live panel run.
+Initial release. Developed and tested against the Remnawave API specification v3.4.3, including a live panel run.
 
-Highlights
-----------
+Minor Changes
+-------------
 
-- ``user``, ``node`` and ``host`` share one ``state`` property:
-  ``present`` (exists, enabled/disabled left alone), ``enabled``,
-  ``disabled`` and ``absent``.
-- ``node`` can carry the hosts bound to it along when a node is taken out
-  of service, through ``linked_hosts``
-  (``ignore``/``enable``/``disable``/``delete``). Hosts bound to no node are
-  never affected.
-- ``host`` accepts a ``nodes`` option to declare that binding, by node name.
 - Every module supports check mode and diff mode, including the cascade.
+- ``host_info`` filters by ``remark`` or ``address`` and returns every match, which is how to act on all the hosts serving one domain.
+- ``host`` accepts a ``nodes`` option to declare that binding, by node name.
+- ``host`` addresses panels by ``remark`` or, with ``identify_by: address``, by domain, so a list of domains needs no invented remarks; a host created that way takes its address as its remark, and ``remark`` becomes an ordinary field that can rename it. An identifier matching several hosts fails the task instead of picking one.
+- ``node`` can carry the hosts bound to it along when a node is taken out of service, through ``linked_hosts`` (``ignore``/``enable``/``disable``/``delete``). Hosts bound to no node are never affected.
+- ``user``, ``node`` and ``host`` share one ``state`` property: ``present`` (exists, enabled/disabled left alone), ``enabled``, ``disabled`` and ``absent``.
 
 New Modules
 -----------

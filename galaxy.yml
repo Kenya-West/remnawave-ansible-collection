@@ -1,6 +1,7 @@
+---
 namespace: kenyawest
 name: remnawave
-version: 0.1.0
+version: 1.0.1
 readme: README.md
 authors:
   - Kenya-West (Kenya-West@outlook.com)
@@ -29,4 +30,4 @@ build_ignore:
   - tests/output
   - .vscode
   - .history
-  - '*.tar.gz'
+  - "*.tar.gz"

@@ -64,6 +64,24 @@ Underneath, the three resources implement it differently - nodes and users
 have dedicated action endpoints, a host has an `isDisabled` field - which is
 exactly the sort of API detail the module layer is there to hide.
 
+## Identifiers can be chosen, but never guessed
+
+A resource has one stable human identifier, except where the panel offers no
+single natural one. Hosts are the case in point: the display name (`remark`)
+suits panels curated by hand, while deployments generated from a domain list
+have no remark to speak of and would have to invent one. `host` therefore
+takes `identify_by` (`remark`, the default, or `address`), and the option not
+in use becomes an ordinary managed field - which is how a host found by its
+domain can be renamed.
+
+What does not change is the rule that ambiguity is an error. Remarks are
+unique in practice; addresses are not, since one domain can serve several
+inbounds or ports. An identifier matching more than one host fails the task
+and names the candidates rather than picking one, because silently
+reconfiguring an arbitrary member of a set is worse than stopping.
+`host_info` is the escape valve: it filters by remark or address, returns
+every match, and lets the playbook decide.
+
 ## Cascades are opt-in and narrow
 
 `node` can carry the hosts bound to it along when the node is disabled or

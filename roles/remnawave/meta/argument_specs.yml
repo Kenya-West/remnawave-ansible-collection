@@ -3,12 +3,9 @@ argument_specs:
   main:
     short_description: Declaratively manage Remnawave panel entities
     description:
-      - Applies the desired state described by the C(remnawave_*) variables to
-        a Remnawave panel, in dependency order (config profiles, squads,
-        nodes, hosts, users, subscription settings).
-      - Every list item accepts the options of the corresponding module of
-        this collection; only C(name)/C(username)/C(remark) is mandatory per
-        item.
+      - Applies the desired state described by the C(remnawave_*) variables to a Remnawave panel, in dependency order (config profiles, squads, nodes, hosts,
+        users, subscription settings).
+      - Every list item accepts the options of the corresponding module of this collection; only C(name)/C(username)/C(remark) is mandatory per item.
       - The whole role can be run with C(--check) (and C(--diff)).
     options:
       remnawave_panel_url:
@@ -21,10 +18,9 @@ argument_specs:
         description: Remnawave API token (bearer).
       remnawave_api_key:
         type: str
-        default: ''
+        default: ""
         description:
-          - X-Api-Key header value for the Caddy security-via-custom-path
-            setup. Empty means the header is not sent.
+          - X-Api-Key header value for the Caddy security-via-custom-path setup. Empty means the header is not sent.
       remnawave_validate_certs:
         type: bool
         default: true
@@ -71,5 +67,4 @@ argument_specs:
         type: dict
         default: {}
         description:
-          - Options of kenyawest.remnawave.subscription_settings. An empty
-            dict means subscription settings are not managed.
+          - Options of kenyawest.remnawave.subscription_settings. An empty dict means subscription settings are not managed.

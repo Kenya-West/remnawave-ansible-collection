@@ -6,7 +6,7 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: '17 4 * * 1'
+    - cron: "17 4 * * 1"
 
 jobs:
   sanity:
@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ansible: ['2.16', '2.17', '2.18']
+        ansible: ["2.16", "2.17", "2.18"]
     steps:
       - name: Check out the collection
         uses: actions/checkout@v4
@@ -25,10 +25,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
 
       - name: Install ansible-core
-        run: pip install "ansible-core~=${{ matrix.ansible }}.0"
+        run: uv pip install --system "ansible-core~=${{ matrix.ansible }}.0"
 
       - name: Run sanity tests
         working-directory: ansible_collections/kenyawest/remnawave
@@ -46,10 +49,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
 
       - name: Install ansible-core
-        run: pip install ansible-core
+        run: uv pip install --system ansible-core
 
       - name: Run unit tests
         working-directory: ansible_collections/kenyawest/remnawave
@@ -69,10 +75,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
 
       - name: Install ansible-core
-        run: pip install ansible-core
+        run: uv pip install --system ansible-core
 
       - name: Run mock integration suite
         env:

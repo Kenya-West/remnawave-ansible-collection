@@ -1,0 +1,92 @@
+---
+objects: {}
+plugins:
+  become: {}
+  cache: {}
+  callback: {}
+  cliconf: {}
+  connection: {}
+  httpapi: {}
+  inventory: {}
+  lookup: {}
+  module:
+    api:
+      description: Call an arbitrary Remnawave API endpoint
+      name: api
+      namespace: ""
+      version_added:
+    config_profile:
+      description: Manage Remnawave config profiles
+      name: config_profile
+      namespace: ""
+      version_added:
+    config_profile_info:
+      description: Retrieve Remnawave config profiles
+      name: config_profile_info
+      namespace: ""
+      version_added:
+    external_squad:
+      description: Manage Remnawave external squads
+      name: external_squad
+      namespace: ""
+      version_added:
+    external_squad_info:
+      description: Retrieve Remnawave external squads
+      name: external_squad_info
+      namespace: ""
+      version_added:
+    host:
+      description: Manage Remnawave subscription hosts
+      name: host
+      namespace: ""
+      version_added:
+    host_info:
+      description: Retrieve Remnawave hosts
+      name: host_info
+      namespace: ""
+      version_added:
+    internal_squad:
+      description: Manage Remnawave internal squads
+      name: internal_squad
+      namespace: ""
+      version_added:
+    internal_squad_info:
+      description: Retrieve Remnawave internal squads
+      name: internal_squad_info
+      namespace: ""
+      version_added:
+    node:
+      description: Manage Remnawave nodes
+      name: node
+      namespace: ""
+      version_added:
+    node_info:
+      description: Retrieve Remnawave nodes
+      name: node_info
+      namespace: ""
+      version_added:
+    subscription_settings:
+      description: Manage Remnawave subscription settings
+      name: subscription_settings
+      namespace: ""
+      version_added:
+    system_info:
+      description: Retrieve Remnawave system information
+      name: system_info
+      namespace: ""
+      version_added:
+    user:
+      description: Manage Remnawave panel users
+      name: user
+      namespace: ""
+      version_added:
+    user_info:
+      description: Retrieve Remnawave users
+      name: user_info
+      namespace: ""
+      version_added:
+  netconf: {}
+  shell: {}
+  strategy: {}
+  vars: {}
+version: 0.1.1

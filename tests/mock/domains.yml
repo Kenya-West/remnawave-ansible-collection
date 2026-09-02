@@ -1,0 +1,242 @@
+---
+# Exercises addressing hosts by domain instead of by remark.
+#
+# Covers: creating one host per domain from a plain list, the remark
+# defaulting to the domain, idempotency, disabling the hosts of a list of
+# domains, renaming through identify_by: address, host_info lookups by
+# address (including a domain shared by two hosts), and the ambiguity that
+# the host module must refuse rather than guess.
+- name: Hosts addressed by domain
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+      token: test-token
+      api_key: sekret
+  vars:
+    domains:
+      - ams.domains.example.com
+      - fra.domains.example.com
+      - waw.domains.example.com
+    retired_domains:
+      - fra.domains.example.com
+      - waw.domains.example.com
+  tasks:
+    - name: Set up config profile
+      kenyawest.remnawave.config_profile:
+        name: domains-profile
+        config:
+          inbounds:
+            - tag: domains-inbound
+              protocol: vless
+              port: 443
+
+    - name: Set up node
+      kenyawest.remnawave.node:
+        name: domains-node
+        state: enabled
+        address: 203.0.113.30
+        config_profile: domains-profile
+        inbounds: [domains-inbound]
+
+    # --- scenario 1: create one host per domain ---------------------------
+
+    - name: Create a host per domain with shared settings
+      kenyawest.remnawave.host:
+        identify_by: address
+        address: "{{ item }}"
+        sni: "{{ item }}"
+        state: enabled
+        config_profile: domains-profile
+        inbound: domains-inbound
+        port: 443
+        fingerprint: chrome
+        nodes: [domains-node]
+      loop: "{{ domains }}"
+      register: created
+
+    - name: Every domain produced a host whose remark is the domain
+      ansible.builtin.assert:
+        that:
+          - created is changed
+          - created.results | map(attribute='host.remark') | sort == domains | sort
+          - created.results | map(attribute='host.sni') | sort == domains | sort
+        fail_msg: "unexpected creation result: {{ created.results | map(attribute='host') | list }}"
+
+    - name: Creating them again is a no-op
+      kenyawest.remnawave.host:
+        identify_by: address
+        address: "{{ item }}"
+        sni: "{{ item }}"
+        state: enabled
+        config_profile: domains-profile
+        inbound: domains-inbound
+        port: 443
+        fingerprint: chrome
+        nodes: [domains-node]
+      loop: "{{ domains }}"
+      register: again
+
+    - name: Creation by domain is idempotent
+      ansible.builtin.assert:
+        that:
+          - again is not changed
+
+    # --- scenario 2: disable the hosts of a list of domains ---------------
+
+    - name: Disable the retired domains in check mode
+      kenyawest.remnawave.host:
+        identify_by: address
+        address: "{{ item }}"
+        state: disabled
+      loop: "{{ retired_domains }}"
+      check_mode: true
+      register: dry
+
+    - name: Read hosts after the dry run
+      kenyawest.remnawave.host_info:
+      register: after_dry
+
+    - name: Check mode predicted the change without applying it
+      ansible.builtin.assert:
+        that:
+          - dry is changed
+          - after_dry.hosts | selectattr('address', 'in', retired_domains)
+            | selectattr('isDisabled') | list | length == 0
+        fail_msg: "check mode disabled a host for real"
+
+    - name: Disable the hosts serving the retired domains
+      kenyawest.remnawave.host:
+        identify_by: address
+        address: "{{ item }}"
+        state: disabled
+      loop: "{{ retired_domains }}"
+      register: disabled
+
+    - name: Read hosts after disabling
+      kenyawest.remnawave.host_info:
+      register: hosts
+
+    - name: Exactly the retired domains are disabled
+      ansible.builtin.assert:
+        that:
+          - disabled is changed
+          - hosts.hosts | selectattr('address', 'in', retired_domains)
+            | rejectattr('isDisabled') | list | length == 0
+          - not (hosts.hosts | selectattr('address', 'eq', domains[0]) | first).isDisabled
+        fail_msg: "wrong hosts disabled: {{ hosts.hosts }}"
+
+    - name: Disabling them again is a no-op
+      kenyawest.remnawave.host:
+        identify_by: address
+        address: "{{ item }}"
+        state: disabled
+      loop: "{{ retired_domains }}"
+      register: disabled_again
+
+    - name: Disabling by domain is idempotent
+      ansible.builtin.assert:
+        that:
+          - disabled_again is not changed
+
+    # --- remark is an ordinary field when addressing by domain ------------
+
+    - name: Rename a host found by its domain
+      kenyawest.remnawave.host:
+        identify_by: address
+        address: "{{ domains[0] }}"
+        remark: Amsterdam
+      register: renamed
+
+    - name: The host kept its address and got the new remark
+      ansible.builtin.assert:
+        that:
+          - renamed is changed
+          - renamed.host.remark == 'Amsterdam'
+          - renamed.host.address == domains[0]
+
+    - name: Renaming again is a no-op
+      kenyawest.remnawave.host:
+        identify_by: address
+        address: "{{ domains[0] }}"
+        remark: Amsterdam
+      register: renamed_again
+
+    - name: Renaming is idempotent
+      ansible.builtin.assert:
+        that:
+          - renamed_again is not changed
+
+    # --- host_info lookups by address -------------------------------------
+
+    - name: Look up one domain
+      kenyawest.remnawave.host_info:
+        address: "{{ domains[0] }}"
+      register: one
+
+    - name: The lookup returned that single host
+      ansible.builtin.assert:
+        that:
+          - one.hosts | length == 1
+          - one.hosts[0].remark == 'Amsterdam'
+
+    - name: Look up a domain that serves no host
+      kenyawest.remnawave.host_info:
+        address: nothing.domains.example.com
+      register: none_found
+
+    - name: An unknown domain returns an empty list rather than failing
+      ansible.builtin.assert:
+        that:
+          - none_found.hosts == []
+
+    # --- ambiguity: one domain, two hosts ---------------------------------
+
+    - name: Add a second host on an already used domain
+      kenyawest.remnawave.host:
+        remark: Amsterdam-8443
+        state: enabled
+        config_profile: domains-profile
+        inbound: domains-inbound
+        address: "{{ domains[0] }}"
+        port: 8443
+        nodes: [domains-node]
+
+    - name: host_info returns both hosts of that domain
+      kenyawest.remnawave.host_info:
+        address: "{{ domains[0] }}"
+      register: both
+
+    - name: Both hosts are reported
+      ansible.builtin.assert:
+        that:
+          - both.hosts | length == 2
+          - both.hosts | map(attribute='remark') | sort == ['Amsterdam', 'Amsterdam-8443']
+
+    - name: Addressing that domain with the host module must fail
+      kenyawest.remnawave.host:
+        identify_by: address
+        address: "{{ domains[0] }}"
+        state: disabled
+      register: ambiguous
+      ignore_errors: true
+
+    - name: The failure names the candidates instead of guessing
+      ansible.builtin.assert:
+        that:
+          - ambiguous is failed
+          - "'Multiple hosts share the address' in ambiguous.msg"
+          - "'Amsterdam-8443' in ambiguous.msg"
+        fail_msg: "ambiguous address was not refused: {{ ambiguous }}"
+
+    - name: Read hosts after the refused task
+      kenyawest.remnawave.host_info:
+        address: "{{ domains[0] }}"
+      register: untouched
+
+    - name: The refusal changed nothing
+      ansible.builtin.assert:
+        that:
+          - untouched.hosts | selectattr('isDisabled') | list | length == 0

@@ -1,15 +1,14 @@
 ---
 # Connection. panel_url and token have no sane default and must be provided
 # (or exported as REMNAWAVE_PANEL_URL / REMNAWAVE_TOKEN for the modules).
-remnawave_panel_url: ''
-remnawave_token: ''
+remnawave_panel_url: ""
+remnawave_token: ""
 # X-Api-Key for the Caddy "security via custom path" setup; leave empty when
 # the panel is not behind that protection layer.
-remnawave_api_key: ''
+remnawave_api_key: ""
 remnawave_validate_certs: true
 remnawave_timeout: 30
 remnawave_request_headers: {}
-
 # Desired state. Each list item accepts the options of the corresponding
 # module (kenyawest.remnawave.config_profile, internal_squad, external_squad,
 # node, host, user); see the module documentation for the full option list.
@@ -19,7 +18,6 @@ remnawave_external_squads: []
 remnawave_nodes: []
 remnawave_hosts: []
 remnawave_users: []
-
 # Options for kenyawest.remnawave.subscription_settings; leave empty to not
 # manage subscription settings.
 remnawave_subscription_settings: {}

@@ -12,6 +12,9 @@
 # Part 2 (cascade.yml) exercises the node -> linked hosts cascade and
 # asserts its own expectations inline.
 #
+# Part 3 (domains.yml) exercises addressing hosts by domain instead of by
+# remark, likewise asserting inline.
+#
 # Requires the collection to be reachable via ANSIBLE_COLLECTIONS_PATH,
 # e.g.  tests/mock/run.sh  from a checkout symlinked as
 # <path>/ansible_collections/kenyawest/remnawave.
@@ -61,6 +64,14 @@ if out="$(run "$HERE/cascade.yml")"; then
     echo "PASS: node to linked-hosts cascade scenarios"
 else
     echo "FAIL: node to linked-hosts cascade scenarios"
+    echo "$out" | tail -60
+    exit 1
+fi
+
+if out="$(run "$HERE/domains.yml")"; then
+    echo "PASS: hosts addressed by domain"
+else
+    echo "FAIL: hosts addressed by domain"
     echo "$out" | tail -60
     exit 1
 fi

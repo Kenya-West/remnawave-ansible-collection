@@ -92,7 +92,7 @@ This must be run with the checkout reachable via
 ansible-test sanity --docker default -v
 ```
 
-All three run in CI on every push and pull request to `main`
+All three run in CI on every push and pull request to `master`
 (`.github/workflows/ci.yml`), across ansible-core 2.16, 2.17 and 2.18 for
 sanity. Run them locally before opening a PR.
 
@@ -176,7 +176,7 @@ breaking changes to existing module options or behavior.
 
 ### GitHub
 
-1. Make sure `main` is green in CI and the version/changelog steps above
+1. Make sure `master` is green in CI and the version/changelog steps above
    are committed and tagged.
 2. Push the tag: `git push origin vX.Y.Z`.
 3. Create a GitHub Release from that tag (`gh release create vX.Y.Z --generate-notes`

@@ -22,7 +22,7 @@ tags:
   - api
   - networking
 repository: https://github.com/Kenya-West/remnawave-ansible-collection
-documentation: https://github.com/Kenya-West/remnawave-ansible-collection/blob/main/README.md
+documentation: https://github.com/Kenya-West/remnawave-ansible-collection/blob/master/README.md
 homepage: https://github.com/Kenya-West/remnawave-ansible-collection
 issues: https://github.com/Kenya-West/remnawave-ansible-collection/issues
 build_ignore:

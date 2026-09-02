@@ -1,0 +1,31 @@
+logs/
+.vault_password.txt
+.env*
+!.env.example
+!.env.j2
+.*rc
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history/*
+
+# Python cache
+/**/__pycache__/
+
+# Temporary files
+temp/*
+!temp/
+temp/**/*
+!temp/**/
+!temp/**/.gitkeep
+
+.ansible/collections
+.ansible/modules
+
+# ansible-test artifacts and built collection tarballs
+tests/output/
+kenyawest-remnawave-*.tar.gz

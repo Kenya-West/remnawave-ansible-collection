@@ -1,0 +1,20 @@
+---
+requires_ansible: '>=2.15.0'
+
+action_groups:
+  remnawave:
+    - api
+    - config_profile
+    - config_profile_info
+    - external_squad
+    - external_squad_info
+    - host
+    - host_info
+    - internal_squad
+    - internal_squad_info
+    - node
+    - node_info
+    - subscription_settings
+    - system_info
+    - user
+    - user_info

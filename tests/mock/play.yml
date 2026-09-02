@@ -1,0 +1,70 @@
+---
+# Applies a full desired state to the mock panel through the remnawave role.
+# Used by run.sh, which asserts change counts across repeated runs and in
+# check mode.
+- name: Apply desired Remnawave state
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    remnawave_panel_url: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+    remnawave_token: test-token
+    remnawave_api_key: sekret
+
+    remnawave_config_profiles:
+      - name: default-profile
+        config:
+          log:
+            loglevel: warning
+          inbounds:
+            - tag: vless-reality
+              protocol: vless
+              port: 443
+            - tag: ss-inbound
+              protocol: shadowsocks
+              port: 8388
+
+    remnawave_internal_squads:
+      - name: default-squad
+        inbounds:
+          - profile: default-profile
+            tag: vless-reality
+
+    remnawave_external_squads:
+      - name: resellers
+
+    remnawave_nodes:
+      - name: nl-ams-1
+        address: 203.0.113.10
+        port: 2222
+        config_profile: default-profile
+        inbounds:
+          - vless-reality
+        state: "{{ node_state | default('enabled') }}"
+        country_code: NL
+
+    remnawave_hosts:
+      - remark: Amsterdam
+        config_profile: default-profile
+        inbound: vless-reality
+        address: ams.example.com
+        port: 443
+        sni: ams.example.com
+        fingerprint: chrome
+        nodes:
+          - nl-ams-1
+
+    remnawave_users:
+      - username: alice
+        expire_at: "2027-01-01T00:00:00Z"
+        traffic_limit: "{{ alice_traffic | default('100GB') }}"
+        traffic_limit_strategy: month
+        internal_squads:
+          - default-squad
+        external_squad: resellers
+
+    remnawave_subscription_settings:
+      randomize_hosts: true
+
+  roles:
+    - kenyawest.remnawave.remnawave

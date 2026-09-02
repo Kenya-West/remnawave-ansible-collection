@@ -1,0 +1,32 @@
+namespace: kenyawest
+name: remnawave
+version: 0.1.0
+readme: README.md
+authors:
+  - Kenya-West (Kenya-West@outlook.com)
+description: >-
+  Declarative management of Remnawave panel entities (users, nodes, hosts,
+  config profiles, squads, subscription settings) over its HTTP API.
+license_file: LICENSE
+tags:
+  - remnawave
+  - vpn
+  - xray
+  - vless
+  - reality
+  - xtls
+  - rprx
+  - xhttp
+  - proxy
+  - api
+  - networking
+repository: https://github.com/Kenya-West/remnawave-ansible-collection
+documentation: https://github.com/Kenya-West/remnawave-ansible-collection/blob/main/README.md
+homepage: https://github.com/Kenya-West/remnawave-ansible-collection
+issues: https://github.com/Kenya-West/remnawave-ansible-collection/issues
+build_ignore:
+  - remnawave-api.yaml
+  - tests/output
+  - .vscode
+  - .history
+  - '*.tar.gz'

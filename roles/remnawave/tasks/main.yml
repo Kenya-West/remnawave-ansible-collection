@@ -1,0 +1,108 @@
+---
+- name: Manage Remnawave entities
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "{{ remnawave_panel_url }}"
+      token: "{{ remnawave_token }}"
+      api_key: "{{ remnawave_api_key | default('', true) or omit }}"
+      validate_certs: "{{ remnawave_validate_certs }}"
+      timeout: "{{ remnawave_timeout }}"
+      request_headers: "{{ remnawave_request_headers }}"
+  block:
+    - name: Manage config profiles
+      kenyawest.remnawave.config_profile:
+        name: "{{ item.name }}"
+        state: "{{ item.state | default('present') }}"
+        config: "{{ item.config | default(omit) }}"
+      loop: "{{ remnawave_config_profiles }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Manage internal squads
+      kenyawest.remnawave.internal_squad:
+        name: "{{ item.name }}"
+        state: "{{ item.state | default('present') }}"
+        inbounds: "{{ item.inbounds | default(omit) }}"
+      loop: "{{ remnawave_internal_squads }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Manage external squads
+      kenyawest.remnawave.external_squad:
+        name: "{{ item.name }}"
+        state: "{{ item.state | default('present') }}"
+      loop: "{{ remnawave_external_squads }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Manage nodes
+      kenyawest.remnawave.node:
+        name: "{{ item.name }}"
+        state: "{{ item.state | default('present') }}"
+        linked_hosts: "{{ item.linked_hosts | default(omit) }}"
+        address: "{{ item.address | default(omit) }}"
+        port: "{{ item.port | default(omit) }}"
+        config_profile: "{{ item.config_profile | default(omit) }}"
+        inbounds: "{{ item.inbounds | default(omit) }}"
+        traffic_tracking: "{{ item.traffic_tracking | default(omit) }}"
+        traffic_limit: "{{ item.traffic_limit | default(omit) }}"
+        notify_percent: "{{ item.notify_percent | default(omit) }}"
+        traffic_reset_day: "{{ item.traffic_reset_day | default(omit) }}"
+        country_code: "{{ item.country_code | default(omit) }}"
+        consumption_multiplier: "{{ item.consumption_multiplier | default(omit) }}"
+        tags: "{{ item.tags | default(omit) }}"
+        note: "{{ item.note | default(omit) }}"
+      loop: "{{ remnawave_nodes }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Manage hosts
+      kenyawest.remnawave.host:
+        remark: "{{ item.remark }}"
+        state: "{{ item.state | default('present') }}"
+        nodes: "{{ item.nodes | default(omit) }}"
+        config_profile: "{{ item.config_profile | default(omit) }}"
+        inbound: "{{ item.inbound | default(omit) }}"
+        address: "{{ item.address | default(omit) }}"
+        port: "{{ item.port | default(omit) }}"
+        path: "{{ item.path | default(omit) }}"
+        sni: "{{ item.sni | default(omit) }}"
+        host_header: "{{ item.host_header | default(omit) }}"
+        alpn: "{{ item.alpn | default(omit) }}"
+        fingerprint: "{{ item.fingerprint | default(omit) }}"
+        security_layer: "{{ item.security_layer | default(omit) }}"
+        hidden: "{{ item.hidden | default(omit) }}"
+        tags: "{{ item.tags | default(omit) }}"
+        server_description: "{{ item.server_description | default(omit) }}"
+      loop: "{{ remnawave_hosts }}"
+      loop_control:
+        label: "{{ item.remark }}"
+
+    - name: Manage users
+      kenyawest.remnawave.user:
+        username: "{{ item.username }}"
+        state: "{{ item.state | default('present') }}"
+        expire_at: "{{ item.expire_at | default(omit) }}"
+        traffic_limit: "{{ item.traffic_limit | default(omit) }}"
+        traffic_limit_strategy: "{{ item.traffic_limit_strategy | default(omit) }}"
+        description: "{{ item.description | default(omit) }}"
+        tag: "{{ item.tag | default(omit) }}"
+        email: "{{ item.email | default(omit) }}"
+        telegram_id: "{{ item.telegram_id | default(omit) }}"
+        hwid_device_limit: "{{ item.hwid_device_limit | default(omit) }}"
+        internal_squads: "{{ item.internal_squads | default(omit) }}"
+        external_squad: "{{ item.external_squad | default(omit) }}"
+      loop: "{{ remnawave_users }}"
+      loop_control:
+        label: "{{ item.username }}"
+
+    - name: Manage subscription settings
+      kenyawest.remnawave.subscription_settings:
+        serve_json_at_base_subscription: "{{ remnawave_subscription_settings.serve_json_at_base_subscription | default(omit) }}"
+        show_custom_remarks: "{{ remnawave_subscription_settings.show_custom_remarks | default(omit) }}"
+        custom_remarks: "{{ remnawave_subscription_settings.custom_remarks | default(omit) }}"
+        custom_response_headers: "{{ remnawave_subscription_settings.custom_response_headers | default(omit) }}"
+        randomize_hosts: "{{ remnawave_subscription_settings.randomize_hosts | default(omit) }}"
+        response_rules: "{{ remnawave_subscription_settings.response_rules | default(omit) }}"
+        hwid_settings: "{{ remnawave_subscription_settings.hwid_settings | default(omit) }}"
+      when: remnawave_subscription_settings | length > 0

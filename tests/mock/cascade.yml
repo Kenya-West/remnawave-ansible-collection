@@ -1,0 +1,211 @@
+---
+# Exercises the node -> linked hosts cascade against the mock panel.
+#
+# Covers: acting on linked hosts without touching the node, decommissioning
+# (disable) and recommissioning (enable), deletion with linked hosts, check
+# mode, idempotency, and the rule that hosts bound to no node are never
+# touched by the cascade.
+- name: Node to linked-hosts cascade
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+      token: test-token
+      api_key: sekret
+  tasks:
+    - name: Set up config profile
+      kenyawest.remnawave.config_profile:
+        name: cascade-profile
+        config:
+          inbounds:
+            - tag: cascade-inbound
+              protocol: vless
+              port: 443
+
+    - name: Set up node
+      kenyawest.remnawave.node:
+        name: cascade-node
+        state: enabled
+        address: 203.0.113.20
+        config_profile: cascade-profile
+        inbounds: [cascade-inbound]
+
+    - name: Set up a host bound to the node
+      kenyawest.remnawave.host:
+        remark: cascade-bound-host
+        state: enabled
+        config_profile: cascade-profile
+        inbound: cascade-inbound
+        address: bound.example.com
+        port: 443
+        nodes: [cascade-node]
+
+    - name: Set up a host bound to no node (served from every node)
+      kenyawest.remnawave.host:
+        remark: cascade-free-host
+        state: enabled
+        config_profile: cascade-profile
+        inbound: cascade-inbound
+        address: free.example.com
+        port: 443
+        nodes: []
+
+    # --- disabling linked hosts without touching the node ----------------
+
+    - name: Disable linked hosts in check mode
+      kenyawest.remnawave.node:
+        name: cascade-node
+        state: present
+        linked_hosts: disable
+      check_mode: true
+      register: dry
+
+    - name: Check mode predicts the cascade without applying it
+      ansible.builtin.assert:
+        that:
+          - dry is changed
+          - dry.linked_hosts == ['cascade-bound-host']
+        fail_msg: "check mode did not predict the cascade: {{ dry }}"
+
+    - name: Read hosts after the dry run
+      kenyawest.remnawave.host_info:
+      register: after_dry
+
+    - name: Check mode changed nothing on the panel
+      ansible.builtin.assert:
+        that:
+          - not (after_dry.hosts | selectattr('remark', 'eq', 'cascade-bound-host')
+                 | first).isDisabled
+        fail_msg: "check mode disabled a host for real"
+
+    - name: Disable linked hosts for real, leaving the node alone
+      kenyawest.remnawave.node:
+        name: cascade-node
+        state: present
+        linked_hosts: disable
+      register: cascade
+
+    - name: Only the bound host was disabled and the node was untouched
+      ansible.builtin.assert:
+        that:
+          - cascade is changed
+          - cascade.linked_hosts == ['cascade-bound-host']
+          - not cascade.node.isDisabled
+        fail_msg: "unexpected cascade result: {{ cascade }}"
+
+    - name: Read hosts after the cascade
+      kenyawest.remnawave.host_info:
+      register: hosts
+
+    - name: The bound host is disabled and the unbound host is untouched
+      ansible.builtin.assert:
+        that:
+          - (hosts.hosts | selectattr('remark', 'eq', 'cascade-bound-host') | first).isDisabled
+          - not (hosts.hosts | selectattr('remark', 'eq', 'cascade-free-host') | first).isDisabled
+        fail_msg: "wrong hosts affected: {{ hosts.hosts }}"
+
+    - name: Disabling linked hosts again is a no-op
+      kenyawest.remnawave.node:
+        name: cascade-node
+        state: present
+        linked_hosts: disable
+      register: again
+
+    - name: Cascade is idempotent
+      ansible.builtin.assert:
+        that:
+          - again is not changed
+          - again.linked_hosts == []
+
+    # --- decommission and recommission -----------------------------------
+
+    - name: Decommission the node together with its hosts
+      kenyawest.remnawave.node:
+        name: cascade-node
+        state: disabled
+        linked_hosts: disable
+      register: decommission
+
+    - name: Only the node changed, its hosts were already disabled
+      ansible.builtin.assert:
+        that:
+          - decommission is changed
+          - decommission.node.isDisabled
+          - decommission.linked_hosts == []
+
+    - name: Decommissioning again is a no-op
+      kenyawest.remnawave.node:
+        name: cascade-node
+        state: disabled
+        linked_hosts: disable
+      register: decommission_again
+
+    - name: Decommission is idempotent
+      ansible.builtin.assert:
+        that:
+          - decommission_again is not changed
+
+    - name: Recommission the node together with its hosts
+      kenyawest.remnawave.node:
+        name: cascade-node
+        state: enabled
+        linked_hosts: enable
+      register: recommission
+
+    - name: Node and bound host are enabled again
+      ansible.builtin.assert:
+        that:
+          - recommission is changed
+          - not recommission.node.isDisabled
+          - recommission.linked_hosts == ['cascade-bound-host']
+
+    # --- deletion ---------------------------------------------------------
+
+    - name: Delete the node together with its hosts
+      kenyawest.remnawave.node:
+        name: cascade-node
+        state: absent
+        linked_hosts: delete
+      register: deletion
+
+    - name: Read hosts after the deletion
+      kenyawest.remnawave.host_info:
+      register: remaining
+
+    - name: The bound host is gone and the unbound host survived
+      ansible.builtin.assert:
+        that:
+          - deletion is changed
+          - deletion.linked_hosts == ['cascade-bound-host']
+          - "'cascade-bound-host' not in remaining_remarks"
+          - "'cascade-free-host' in remaining_remarks"
+        fail_msg: "unexpected hosts left: {{ remaining_remarks }}"
+      vars:
+        remaining_remarks: "{{ remaining.hosts | map(attribute='remark') | list }}"
+
+    - name: Deleting a missing node cascades nothing
+      kenyawest.remnawave.node:
+        name: cascade-node
+        state: absent
+        linked_hosts: delete
+      register: gone
+
+    - name: Deletion is idempotent
+      ansible.builtin.assert:
+        that:
+          - gone is not changed
+          - gone.linked_hosts == []
+
+    # --- clean up ---------------------------------------------------------
+
+    - name: Remove the remaining host
+      kenyawest.remnawave.host:
+        remark: cascade-free-host
+        state: absent
+
+    - name: Remove the config profile
+      kenyawest.remnawave.config_profile:
+        name: cascade-profile
+        state: absent

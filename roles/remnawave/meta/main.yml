@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  author: Kenya West
+  description: Declarative management of Remnawave panel entities over its HTTP API
+  license: GPL-3.0-or-later
+  min_ansible_version: '2.15'
+  platforms:
+    - name: GenericLinux
+      versions:
+        - all
+  galaxy_tags:
+    - remnawave
+    - vpn
+    - xray
+    - api
+
+dependencies: []

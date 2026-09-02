@@ -1,0 +1,80 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 4 * * 1'
+
+jobs:
+  sanity:
+    name: Sanity (ansible-core ${{ matrix.ansible }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ansible: ['2.16', '2.17', '2.18']
+    steps:
+      - name: Check out the collection
+        uses: actions/checkout@v4
+        with:
+          path: ansible_collections/kenyawest/remnawave
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ansible-core
+        run: pip install "ansible-core~=${{ matrix.ansible }}.0"
+
+      - name: Run sanity tests
+        working-directory: ansible_collections/kenyawest/remnawave
+        run: ansible-test sanity --docker default -v
+
+  units:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the collection
+        uses: actions/checkout@v4
+        with:
+          path: ansible_collections/kenyawest/remnawave
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ansible-core
+        run: pip install ansible-core
+
+      - name: Run unit tests
+        working-directory: ansible_collections/kenyawest/remnawave
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python3 -m unittest tests.unit.plugins.module_utils.test_common -v
+
+  mock-integration:
+    name: Mock panel integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the collection
+        uses: actions/checkout@v4
+        with:
+          path: ansible_collections/kenyawest/remnawave
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ansible-core
+        run: pip install ansible-core
+
+      - name: Run mock integration suite
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}
+        run: bash ansible_collections/kenyawest/remnawave/tests/mock/run.sh

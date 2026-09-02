@@ -1,0 +1,75 @@
+---
+argument_specs:
+  main:
+    short_description: Declaratively manage Remnawave panel entities
+    description:
+      - Applies the desired state described by the C(remnawave_*) variables to
+        a Remnawave panel, in dependency order (config profiles, squads,
+        nodes, hosts, users, subscription settings).
+      - Every list item accepts the options of the corresponding module of
+        this collection; only C(name)/C(username)/C(remark) is mandatory per
+        item.
+      - The whole role can be run with C(--check) (and C(--diff)).
+    options:
+      remnawave_panel_url:
+        type: str
+        required: true
+        description: Base URL of the Remnawave panel.
+      remnawave_token:
+        type: str
+        required: true
+        description: Remnawave API token (bearer).
+      remnawave_api_key:
+        type: str
+        default: ''
+        description:
+          - X-Api-Key header value for the Caddy security-via-custom-path
+            setup. Empty means the header is not sent.
+      remnawave_validate_certs:
+        type: bool
+        default: true
+        description: Whether to validate TLS certificates.
+      remnawave_timeout:
+        type: int
+        default: 30
+        description: API request timeout in seconds.
+      remnawave_request_headers:
+        type: dict
+        default: {}
+        description: Extra HTTP headers to send with every API request.
+      remnawave_config_profiles:
+        type: list
+        elements: dict
+        default: []
+        description: Desired config profiles (options of kenyawest.remnawave.config_profile).
+      remnawave_internal_squads:
+        type: list
+        elements: dict
+        default: []
+        description: Desired internal squads (options of kenyawest.remnawave.internal_squad).
+      remnawave_external_squads:
+        type: list
+        elements: dict
+        default: []
+        description: Desired external squads (options of kenyawest.remnawave.external_squad).
+      remnawave_nodes:
+        type: list
+        elements: dict
+        default: []
+        description: Desired nodes (options of kenyawest.remnawave.node).
+      remnawave_hosts:
+        type: list
+        elements: dict
+        default: []
+        description: Desired hosts (options of kenyawest.remnawave.host).
+      remnawave_users:
+        type: list
+        elements: dict
+        default: []
+        description: Desired users (options of kenyawest.remnawave.user).
+      remnawave_subscription_settings:
+        type: dict
+        default: {}
+        description:
+          - Options of kenyawest.remnawave.subscription_settings. An empty
+            dict means subscription settings are not managed.

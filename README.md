@@ -55,6 +55,7 @@ only the Python standard library.
 | `node`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, cascade onto linked hosts |
 | `host`, `host_info` | Subscription hosts: address, SNI, transport parameters, node binding, visibility. Addressable by remark or by domain (`identify_by`) |
 | `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative) |
+| `snippet`, `snippet_info` | Reusable configuration fragments, with syncing into the profiles that embed them |
 | `internal_squad`, `internal_squad_info` | Internal squads and their inbounds |
 | `external_squad`, `external_squad_info` | External squads |
 | `subscription_settings` | Panel-wide subscription settings (singleton) |
@@ -77,8 +78,9 @@ the panel. List-valued options (`internal_squads`, `inbounds`, `tags`,
 | `disabled` | As `present`, and the entity is disabled. Created disabled if missing. |
 | `absent` | The entity is deleted. |
 
-The other modules (`config_profile`, `internal_squad`, `external_squad`) have
-no enabled/disabled concept and accept `present`/`absent` only.
+The other modules (`config_profile`, `snippet`, `internal_squad`,
+`external_squad`) have no enabled/disabled concept and accept
+`present`/`absent` only.
 
 For users, the panel derives `LIMITED` (over quota) and `EXPIRED` itself.
 `state: enabled` treats those as already satisfied rather than forcing them
@@ -278,6 +280,37 @@ collection, including the role, is usable in dry-run mode. A dry run against
 a fresh panel also works: references to entities that would be created by
 earlier tasks are shown by name in the predicted diff.
 
+### Snippets and syncing
+
+Snippets are reusable configuration fragments that config profiles embed.
+They are addressed by name - which may contain `/` to group them into
+folders - and the content you supply is authoritative:
+
+```yaml
+- kenyawest.remnawave.snippet:
+    name: outbounds/warp
+    snippet: "{{ lookup('ansible.builtin.file', 'files/warp-outbound.json') }}"
+```
+
+Editing a snippet does not by itself reach the profiles that embed it; the
+panel has a separate sync action for that. The module runs it for you
+whenever it actually changed something, so a converged run stays a no-op.
+The `sync` option controls this:
+
+| `sync` | Behaviour |
+| --- | --- |
+| `on_change` (default) | Sync only when this task created or updated the snippet |
+| `never` | Never sync - useful to update a batch of snippets and sync afterwards |
+| `always` | Sync on every run, even when the content already matched |
+
+`always` performs an action rather than settling state, so such a task
+always reports `changed`; reach for it deliberately, for example to repair
+profiles that drifted. Deleting a snippet never syncs, since there is
+nothing left to push.
+
+The role applies `remnawave_snippets` before `remnawave_config_profiles`,
+so a profile referencing a snippet finds it already in place.
+
 ## Semantics worth knowing
 
 - **Traffic limits** accept integers (bytes) or human-readable sizes
@@ -290,17 +323,17 @@ earlier tasks are shown by name in the predicted diff.
   quota does not flap between runs.
 - **Clearing nullable string fields** (`tag`, `email`, `description`,
   `note`, ...) is done by setting them to an empty string.
-- **`config_profile.config` is authoritative**: the panel's stored config is
-  made exactly equal to what you supply.
+- **`config_profile.config` and `snippet.snippet` are authoritative**: the
+  panel's stored content is made exactly equal to what you supply.
 - **Deleting is explicit**: the role and modules never remove entities that
   are simply absent from your variables; removal requires `state: absent`.
 
 ## What is intentionally not covered
 
 Infra billing, node plugins and integrations, HWID device management, API
-token management, passkeys, snippets and subscription page configs are not
-modeled (yet). Of the bulk endpoints, only the host ones used by the node
-cascade are. If you need something else, use the escape hatch:
+token management, passkeys and subscription page configs are not modeled
+(yet). Of the bulk endpoints, only the host ones used by the node cascade
+are. If you need something else, use the escape hatch:
 
 ```yaml
 - name: Reset traffic for a user (non-idempotent action)

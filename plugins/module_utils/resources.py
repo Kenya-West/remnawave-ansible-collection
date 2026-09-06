@@ -187,6 +187,52 @@ def bulk_host_action(client, action, uuids):
     client.post('/api/hosts/bulk/%s' % action, {'uuids': list(uuids)})
 
 
+def list_snippets(client):
+    data = client.get('/api/snippets')
+    return (data or {}).get('snippets', [])
+
+
+def find_snippet(client, name, required=False):
+    """The snippet with this name, or None.
+
+    Snippets are keyed by name throughout the API - there is no UUID - so
+    every operation, deletion included, addresses them this way.
+    """
+    matches = [s for s in list_snippets(client) if s.get('name') == name]
+    if not matches:
+        if required:
+            raise RemnawaveApiError('Snippet %r not found' % name)
+        return None
+    return matches[0]
+
+
+def _written_snippet(data, name, content):
+    """The single snippet out of a create or update response.
+
+    Writes answer with the same envelope as the listing - a total and a
+    list of snippets - so unwrap it back to the one that was addressed.
+    """
+    for item in (data or {}).get('snippets', []):
+        if item.get('name') == name:
+            return item
+    return {'name': name, 'snippet': content}
+
+
+def create_snippet(client, name, content):
+    data = client.post('/api/snippets', {'name': name, 'snippet': content})
+    return _written_snippet(data, name, content)
+
+
+def update_snippet(client, name, content):
+    data = client.patch('/api/snippets', {'name': name, 'snippet': content})
+    return _written_snippet(data, name, content)
+
+
+def sync_snippet(client, name):
+    """Push a snippet's current content into the config profiles using it."""
+    client.post('/api/snippets/actions/sync', {'name': name})
+
+
 def get_user_by_username(client, username):
     return client.get('/api/users/by-username/%s' % username, allow_404=True)
 

@@ -10,8 +10,10 @@ remnawave_validate_certs: true
 remnawave_timeout: 30
 remnawave_request_headers: {}
 # Desired state. Each list item accepts the options of the corresponding
-# module (kenyawest.remnawave.config_profile, internal_squad, external_squad,
-# node, host, user); see the module documentation for the full option list.
+# module (kenyawest.remnawave.snippet, config_profile, internal_squad,
+# external_squad, node, host, user); see the module documentation for the
+# full option list. Snippets come first because config profiles embed them.
+remnawave_snippets: []
 remnawave_config_profiles: []
 remnawave_internal_squads: []
 remnawave_external_squads: []

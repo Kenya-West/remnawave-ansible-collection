@@ -33,6 +33,13 @@ argument_specs:
         type: dict
         default: {}
         description: Extra HTTP headers to send with every API request.
+      remnawave_snippets:
+        type: list
+        elements: dict
+        default: []
+        description:
+          - Desired snippets (options of kenyawest.remnawave.snippet).
+          - Applied before config profiles, which embed them.
       remnawave_config_profiles:
         type: list
         elements: dict

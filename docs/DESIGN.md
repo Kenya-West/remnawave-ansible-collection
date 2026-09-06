@@ -7,7 +7,7 @@ changes stay consistent with them.
 
 The Remnawave API (v3.4.3) exposes 161 paths across roughly 28 controllers.
 Its conceptual resource model is far smaller: users, nodes, hosts, config
-profiles, squads, and a handful of settings singletons. The collection maps
+profiles, snippets, squads, and a handful of settings singletons. The collection maps
 Ansible modules to that resource model, not to the endpoint list.
 
 Consequences:
@@ -122,6 +122,20 @@ not state; a `reset_traffic: true` option would fire on every run. They are
 intentionally left to the `api` escape-hatch module, and their
 non-idempotence is the caller's to handle (`changed_when`, conditions).
 
+The exception is an action that *completes* a state change rather than
+standing on its own. Syncing a snippet is one: the panel stores snippet
+content and the config profiles embedding it separately, so a snippet
+updated without a sync is only half-applied, and no playbook wants that as
+its resting state. `snippet` therefore runs the sync itself, but only when
+it actually changed the content (`sync: on_change`), which keeps a
+converged run a no-op. The two escapes are explicit: `never`, to update a
+batch and sync once afterwards, and `always`, which is a real action and is
+documented as always reporting `changed`.
+
+The test for whether an action belongs in a resource module is this: would
+leaving it out make the module's own change incomplete? Restarting a node
+is not in that category; syncing a snippet you just rewrote is.
+
 ## Versioning policy
 
 The collection is versioned semantically and pins a tested Remnawave API
@@ -148,3 +162,6 @@ Checklist:
    group in `meta/runtime.yml` plus, when appropriate, to the role.
 7. Any relationship that cascades gets its own scenario in
    `tests/mock/cascade.yml`, including the case that must *not* be touched.
+8. If the API needs a follow-up action for the change to take effect, run
+   it from the module on change rather than leaving it to the caller, and
+   give the playbook a way to opt out - see snippet syncing above.

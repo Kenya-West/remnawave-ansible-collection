@@ -41,13 +41,14 @@ and you want a single `ansible-playbook` run to reconcile it.
 It runs one task per entity kind, always in this order, because each stage may
 reference names created by the previous ones:
 
-1. config profiles (`remnawave_config_profiles`)
-2. internal squads (`remnawave_internal_squads`)
-3. external squads (`remnawave_external_squads`)
-4. nodes (`remnawave_nodes`)
-5. hosts (`remnawave_hosts`)
-6. users (`remnawave_users`)
-7. subscription settings (`remnawave_subscription_settings`)
+1. snippets (`remnawave_snippets`)
+2. config profiles (`remnawave_config_profiles`)
+3. internal squads (`remnawave_internal_squads`)
+4. external squads (`remnawave_external_squads`)
+5. nodes (`remnawave_nodes`)
+6. hosts (`remnawave_hosts`)
+7. users (`remnawave_users`)
+8. subscription settings (`remnawave_subscription_settings`)
 
 Each stage is skipped when its variable is empty, which is the default. So a
 play that sets only `remnawave_users` manages only users and never looks at
@@ -93,6 +94,7 @@ the play - the modules fall back to them.
 
 | Variable | Type | Default | Items accept the options of |
 | --- | --- | --- | --- |
+| `remnawave_snippets` | list of dict | `[]` | `kenyawest.remnawave.snippet` |
 | `remnawave_config_profiles` | list of dict | `[]` | `kenyawest.remnawave.config_profile` |
 | `remnawave_internal_squads` | list of dict | `[]` | `kenyawest.remnawave.internal_squad` |
 | `remnawave_external_squads` | list of dict | `[]` | `kenyawest.remnawave.external_squad` |
@@ -109,6 +111,16 @@ which leaves that field alone on the panel.
 
 The authoritative reference is `ansible-doc kenyawest.remnawave.<module>`.
 The tables below are the same options, in the shape the role expects them.
+
+**`remnawave_snippets`** - reusable configuration fragments that config
+profiles embed. Applied first, so a profile referencing one finds it in place.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `name` | str | Required. Identifier. May contain `/` to group snippets into folders, for example `outbounds/warp`. |
+| `state` | str | `present` (default) or `absent`. |
+| `snippet` | list or JSON str | The fragment content. Authoritative: the panel's stored content is made exactly equal to it. Required when the snippet does not exist yet. |
+| `sync` | str | `on_change` (default), `never` or `always`. Whether to push the snippet into the config profiles embedding it. `always` performs an action every run and therefore always reports `changed`. |
 
 **`remnawave_config_profiles`** - Xray config profiles.
 
@@ -301,6 +313,10 @@ entity and leave the old one, so rename in the panel or delete explicitly.
   vars:
     remnawave_panel_url: https://panel.example.com
     remnawave_token: "{{ vault_remnawave_token }}"
+
+    remnawave_snippets:
+      - name: outbounds/warp
+        snippet: "{{ lookup('ansible.builtin.file', 'files/warp-outbound.json') }}"
 
     remnawave_config_profiles:
       - name: default-profile
@@ -654,9 +670,14 @@ one and costs a single request:
 - **User status.** The panel derives `LIMITED` (over quota) and `EXPIRED`
   itself. `state: enabled` treats those as already satisfied instead of forcing
   the user back to `ACTIVE`, which the panel would undo on its next pass.
-- **`config` is authoritative.** A config profile's stored Xray config is made
-  exactly equal to what you supply; anything edited in the panel UI is
-  overwritten.
+- **`config` and `snippet` are authoritative.** A config profile's stored Xray
+  config, and a snippet's stored content, are made exactly equal to what you
+  supply; anything edited in the panel UI is overwritten.
+- **Snippets sync themselves.** Changing a snippet does not by itself reach the
+  config profiles embedding it, so the snippet stage runs the panel's sync
+  action whenever it changed something. Set `sync: never` on an entry to defer
+  that, or `sync: always` to force it - the latter is an action, so it reports
+  `changed` on every run.
 - **Nothing is deleted implicitly.** Removing an entry from the variables stops
   managing that entity, it does not remove it from the panel.
 - **Secrets.** `remnawave_token` and `remnawave_api_key` are credentials; keep

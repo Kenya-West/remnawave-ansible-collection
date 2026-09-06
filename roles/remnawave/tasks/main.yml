@@ -9,6 +9,18 @@
       timeout: "{{ remnawave_timeout }}"
       request_headers: "{{ remnawave_request_headers }}"
   block:
+    # Snippets first: config profiles embed them, so they must exist (and be
+    # up to date) before a profile referencing them is written.
+    - name: Manage snippets
+      kenyawest.remnawave.snippet:
+        name: "{{ item.name }}"
+        state: "{{ item.state | default('present') }}"
+        snippet: "{{ item.snippet | default(omit) }}"
+        sync: "{{ item.sync | default(omit) }}"
+      loop: "{{ remnawave_snippets }}"
+      loop_control:
+        label: "{{ item.name }}"
+
     - name: Manage config profiles
       kenyawest.remnawave.config_profile:
         name: "{{ item.name }}"

@@ -4,6 +4,17 @@ kenyawest.remnawave Release Notes
 
 .. contents:: Topics
 
+v1.0.2
+======
+
+Minor Changes
+-------------
+
+- remnawave role - add ``remnawave_snippets``, applied before ``remnawave_config_profiles`` because profiles embed snippets.
+- snippet - manage Remnawave snippets declaratively, addressed by name, with the supplied content treated as authoritative.
+- snippet - run the panel's sync action against the config profiles embedding a snippet whenever the snippet changed, controlled by the new ``sync`` option (``on_change`` by default, or ``never``/``always``).
+- snippet_info - retrieve one snippet by name or list all of them.
+
 v0.1.1
 ======
 

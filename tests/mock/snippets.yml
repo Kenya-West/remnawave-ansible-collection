@@ -1,0 +1,223 @@
+---
+# Exercises snippet management and the sync-to-config-profiles action
+# against the mock panel.
+#
+# Covers: creation, authoritative content updates, idempotency, check mode,
+# deletion, and each value of the sync option. The mock panel counts sync
+# actions per snippet at /api/_test/snippet-syncs so the tests can tell
+# whether a sync really happened.
+- name: Snippets and snippet syncing
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "{{ panel }}"
+      token: test-token
+      api_key: sekret
+  vars:
+    panel: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+    snippet_name: snippets-test/warp
+  tasks:
+    - name: Creating a snippet is predicted in check mode
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+        snippet: &content
+          - tag: warp
+            protocol: wireguard
+      check_mode: true
+      register: dry
+
+    - name: Read snippets after the dry run
+      kenyawest.remnawave.snippet_info:
+        name: "{{ snippet_name }}"
+      register: after_dry
+
+    - name: Check mode predicted the change without creating anything
+      ansible.builtin.assert:
+        that:
+          - dry is changed
+          - dry.synced
+          - after_dry.snippets == []
+        fail_msg: "check mode created the snippet: {{ after_dry.snippets }}"
+
+    - name: Create the snippet
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+        snippet: *content
+      register: created
+
+    - name: The snippet was created and synced to the profiles using it
+      ansible.builtin.assert:
+        that:
+          - created is changed
+          - created.synced
+          - "created.snippet.snippet == [{'tag': 'warp', 'protocol': 'wireguard'}]"
+
+    - name: Creating it again is a no-op that does not re-sync
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+        snippet: *content
+      register: again
+
+    - name: Snippet management is idempotent
+      ansible.builtin.assert:
+        that:
+          - again is not changed
+          - not again.synced
+
+    - name: Sync counters after the converged run
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/snippet-syncs"
+        headers:
+          Authorization: Bearer test-token
+          X-Api-Key: sekret
+      register: counts
+
+    - name: Only the creation triggered a sync
+      ansible.builtin.assert:
+        that:
+          - counts.json[snippet_name] == 1
+        fail_msg: "unexpected sync counts: {{ counts.json }}"
+
+    # --- authoritative content ------------------------------------------
+
+    - name: Change the snippet content
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+        snippet:
+          - tag: warp
+            protocol: wireguard
+            settings:
+              mtu: 1280
+      register: updated
+
+    - name: Read the snippet back
+      kenyawest.remnawave.snippet_info:
+        name: "{{ snippet_name }}"
+      register: stored
+
+    - name: The stored content is exactly what was supplied, and it re-synced
+      ansible.builtin.assert:
+        that:
+          - updated is changed
+          - updated.synced
+          - updated.snippet.snippet[0].settings.mtu == 1280
+          - stored.snippets[0].snippet[0].settings.mtu == 1280
+
+    - name: Content given as a JSON string is compared the same way
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+        snippet: '[{"tag": "warp", "protocol": "wireguard", "settings": {"mtu": 1280}}]'
+      register: as_json
+
+    - name: A JSON string matching the stored content changes nothing
+      ansible.builtin.assert:
+        that:
+          - as_json is not changed
+
+    # --- the sync option -------------------------------------------------
+
+    - name: Update with sync=never
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+        snippet:
+          - tag: warp
+            protocol: wireguard
+            settings:
+              mtu: 1300
+        sync: never
+      register: unsynced
+
+    - name: The snippet changed but was deliberately not synced
+      ansible.builtin.assert:
+        that:
+          - unsynced is changed
+          - not unsynced.synced
+
+    - name: Force a sync of an already converged snippet
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+        sync: always
+      register: forced
+
+    - name: sync=always reports a change because it performed an action
+      ansible.builtin.assert:
+        that:
+          - forced is changed
+          - forced.synced
+
+    - name: Sync counters after the sync-option scenarios
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/snippet-syncs"
+        headers:
+          Authorization: Bearer test-token
+          X-Api-Key: sekret
+      register: counts
+
+    - name: Create, update and the forced sync each synced exactly once
+      ansible.builtin.assert:
+        that:
+          - counts.json[snippet_name] == 3
+        fail_msg: "unexpected sync counts: {{ counts.json }}"
+
+    # --- omitting content ------------------------------------------------
+
+    - name: Omitting the content leaves an existing snippet alone
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+      register: untouched
+
+    - name: Nothing changed and nothing was synced
+      ansible.builtin.assert:
+        that:
+          - untouched is not changed
+          - untouched.snippet.snippet[0].settings.mtu == 1300
+
+    - name: Creating without content fails with a clear message
+      kenyawest.remnawave.snippet:
+        name: snippets-test/never-created
+      register: failure
+      ignore_errors: true
+
+    - name: The failure names the missing option
+      ansible.builtin.assert:
+        that:
+          - failure is failed
+          - "'snippet is required' in failure.msg"
+        fail_msg: "unexpected failure: {{ failure }}"
+
+    # --- deletion ---------------------------------------------------------
+
+    - name: Delete the snippet
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+        state: absent
+      register: deleted
+
+    - name: Deleting does not sync, because there is nothing left to push
+      ansible.builtin.assert:
+        that:
+          - deleted is changed
+          - not deleted.synced
+
+    - name: Deleting again is a no-op
+      kenyawest.remnawave.snippet:
+        name: "{{ snippet_name }}"
+        state: absent
+      register: deleted_again
+
+    - name: Deletion is idempotent
+      ansible.builtin.assert:
+        that:
+          - deleted_again is not changed
+
+    - name: The snippet is gone from the panel
+      kenyawest.remnawave.snippet_info:
+        name: "{{ snippet_name }}"
+      register: gone
+
+    - name: Nothing is returned for the deleted name
+      ansible.builtin.assert:
+        that:
+          - gone.snippets == []

@@ -65,6 +65,16 @@ plugins:
       name: node_info
       namespace: ""
       version_added:
+    snippet:
+      description: Manage Remnawave snippets
+      name: snippet
+      namespace: ""
+      version_added:
+    snippet_info:
+      description: Retrieve Remnawave snippets
+      name: snippet_info
+      namespace: ""
+      version_added:
     subscription_settings:
       description: Manage Remnawave subscription settings
       name: subscription_settings
@@ -89,4 +99,4 @@ plugins:
   shell: {}
   strategy: {}
   vars: {}
-version: 0.1.1
+version: 1.0.2

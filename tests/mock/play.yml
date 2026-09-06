@@ -11,6 +11,12 @@
     remnawave_token: test-token
     remnawave_api_key: sekret
 
+    remnawave_snippets:
+      - name: outbounds/direct
+        snippet:
+          - tag: "{{ snippet_tag | default('DIRECT') }}"
+            protocol: freedom
+
     remnawave_config_profiles:
       - name: default-profile
         config:

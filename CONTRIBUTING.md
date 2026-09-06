@@ -40,7 +40,7 @@ and `python3` resolve from it.
 ## Repository layout
 
 - `plugins/modules/` - one file per resource (`user`, `node`, `host`,
-  `config_profile`, `internal_squad`, `external_squad`,
+  `config_profile`, `snippet`, `internal_squad`, `external_squad`,
   `subscription_settings`, `api`, plus each resource's `*_info` module).
 - `plugins/module_utils/`
   - `client.py` - HTTP transport, auth, error translation only.

@@ -27,6 +27,10 @@ DB = {
     'nodes': {},
     'hosts': {},
     'users': {},
+    'snippets': {},
+    # Counts sync actions per snippet name, so the tests can assert when a
+    # snippet was actually pushed to the config profiles using it.
+    'snippet_syncs': {},
     'subscription_settings': {
         'uuid': str(uuidlib.uuid4()),
         'serveJsonAtBaseSubscription': True,
@@ -409,6 +413,57 @@ def user_delete(handler, user_id):
     handler.reply(200, {'isDeleted': True})
 
 
+def snippet_list(handler):
+    items = list(DB['snippets'].values())
+    handler.reply(200, {'total': len(items), 'snippets': items})
+
+
+def snippet_create(handler):
+    body = handler.read_body()
+    item = {'name': body['name'], 'snippet': body.get('snippet')}
+    DB['snippets'][item['name']] = item
+    # Writes answer with the same envelope as the listing, not with the
+    # bare snippet, so the modules have to unwrap them the same way.
+    handler.reply(201, {'total': 1, 'snippets': [item]})
+
+
+def snippet_update(handler):
+    body = handler.read_body()
+    item = DB['snippets'].get(body.get('name'))
+    if not item:
+        handler.not_found()
+        return
+    item['snippet'] = body.get('snippet')
+    handler.reply(200, {'total': 1, 'snippets': [item]})
+
+
+def snippet_delete(handler):
+    body = handler.read_body()
+    if DB['snippets'].pop(body.get('name'), None) is None:
+        handler.not_found()
+        return
+    handler.reply(204, None)
+
+
+def snippet_sync(handler):
+    body = handler.read_body()
+    name = body.get('name')
+    if name not in DB['snippets']:
+        handler.not_found()
+        return
+    DB['snippet_syncs'][name] = DB['snippet_syncs'].get(name, 0) + 1
+    handler.reply(202, None)
+
+
+def snippet_sync_counts(handler):
+    """Test-only endpoint: how often each snippet has been synced.
+
+    Not part of the Remnawave API, so it is returned without the
+    ``{"response": ...}`` envelope the real endpoints use.
+    """
+    handler.reply(200, DB['snippet_syncs'], envelope=False)
+
+
 def subscription_settings_get(handler):
     handler.reply(200, DB['subscription_settings'])
 
@@ -455,6 +510,12 @@ ROUTES = [
     (r'GET /api/users', user_list),
     (r'GET /api/users/by-username/([^/]+)', user_by_username),
     (r'DELETE /api/users/(\d+)', user_delete),
+    (r'POST /api/snippets/actions/sync', snippet_sync),
+    (r'GET /api/snippets', snippet_list),
+    (r'POST /api/snippets', snippet_create),
+    (r'PATCH /api/snippets', snippet_update),
+    (r'DELETE /api/snippets', snippet_delete),
+    (r'GET /api/_test/snippet-syncs', snippet_sync_counts),
     (r'GET /api/subscription-settings', subscription_settings_get),
     (r'PATCH /api/subscription-settings', subscription_settings_update),
     (r'GET /api/system/health', health),

@@ -15,7 +15,10 @@
 # Part 3 (domains.yml) exercises addressing hosts by domain instead of by
 # remark, likewise asserting inline.
 #
-# Part 4 (snippets.yml) exercises snippets and the sync-to-config-profiles
+# Part 4 (routing.yml) exercises the host options behind VLESS routing -
+# route id, SNI overrides, subscription exclusions, squad visibility.
+#
+# Part 5 (snippets.yml) exercises snippets and the sync-to-config-profiles
 # action, also asserting inline.
 #
 # Requires the collection to be reachable via ANSIBLE_COLLECTIONS_PATH,
@@ -75,6 +78,14 @@ if out="$(run "$HERE/domains.yml")"; then
     echo "PASS: hosts addressed by domain"
 else
     echo "FAIL: hosts addressed by domain"
+    echo "$out" | tail -60
+    exit 1
+fi
+
+if out="$(run "$HERE/routing.yml")"; then
+    echo "PASS: host routing options"
+else
+    echo "FAIL: host routing options"
     echo "$out" | tail -60
     exit 1
 fi

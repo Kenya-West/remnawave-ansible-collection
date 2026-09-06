@@ -53,7 +53,7 @@ only the Python standard library.
 | --- | --- |
 | `user`, `user_info` | Panel users: expiration, traffic limits, squad membership, enable/disable |
 | `node`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, cascade onto linked hosts |
-| `host`, `host_info` | Subscription hosts: address, SNI, transport parameters, node binding, visibility. Addressable by remark or by domain (`identify_by`) |
+| `host`, `host_info` | Subscription hosts: address, SNI, transport parameters, VLESS route id, node binding, subscription and squad visibility. Addressable by remark or by domain (`identify_by`) |
 | `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative) |
 | `snippet`, `snippet_info` | Reusable configuration fragments, with syncing into the profiles that embed them |
 | `internal_squad`, `internal_squad_info` | Internal squads and their inbounds |
@@ -133,6 +133,51 @@ which is the way to act on all of them:
     state: disabled
   loop: "{{ matched.results | map(attribute='hosts') | flatten }}"
 ```
+
+### VLESS routing on hosts
+
+A host can carry a `vless_route_id` that the routing rules of its config
+profile match on, which is how one published domain is made to leave
+through a particular outbound or balancer. Chain entries - hosts whose
+address is an intermediate node rather than the exit - normally pair it
+with `override_sni_from_address`, since the domain they publish is not the
+one the exit terminates TLS for:
+
+```yaml
+# Four chain entries into the same exit, all on one route id
+- kenyawest.remnawave.host:
+    identify_by: address
+    address: "{{ item }}"
+    remark: "Amsterdam via {{ item.split('.')[0] }}"
+    state: enabled
+    config_profile: default-profile
+    inbound: vless-reality
+    port: 443
+    vless_route_id: 400
+    override_sni_from_address: true
+  loop: "{{ chain_entry_domains }}"
+```
+
+`vless_route_id` is an integer between 0 and 65535; an empty string clears
+it, leaving the host with no route id, the way the other nullable fields
+are cleared.
+
+Two more options govern who sees a host:
+`exclude_from_subscription_types` (`XRAY_JSON`, `XRAY_BASE64`, `MIHOMO`,
+`STASH`, `CLASH`, `SINGBOX`) and `internal_squads`, which takes a `mode` of
+`exclude` or `allow_only` plus the squads it applies to, by name:
+
+```yaml
+- kenyawest.remnawave.host:
+    remark: Amsterdam
+    exclude_from_subscription_types: [SINGBOX]
+    internal_squads:
+      mode: exclude
+      squads: [trial-squad]
+```
+
+Both lists are authoritative when set, so an empty list clears the
+exclusion.
 
 ### Decommissioning a node with its hosts
 
@@ -321,8 +366,8 @@ so a profile referencing a snippet finds it already in place.
 - **User status**: the panel derives `LIMITED` and `EXPIRED` itself for
   enabled users. `state: enabled` treats those as satisfied, so a user over
   quota does not flap between runs.
-- **Clearing nullable string fields** (`tag`, `email`, `description`,
-  `note`, ...) is done by setting them to an empty string.
+- **Clearing nullable fields** (`tag`, `email`, `description`, `note`,
+  `vless_route_id`, ...) is done by setting them to an empty string.
 - **`config_profile.config` and `snippet.snippet` are authoritative**: the
   panel's stored content is made exactly equal to what you supply.
 - **Deleting is explicit**: the role and modules never remove entities that

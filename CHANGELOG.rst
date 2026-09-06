@@ -4,6 +4,17 @@ kenyawest.remnawave Release Notes
 
 .. contents:: Topics
 
+v1.1.0
+======
+
+Minor Changes
+-------------
+
+- host - add ``exclude_from_subscription_types``, authoritative when set, to leave a host out of some subscription formats.
+- host - add ``internal_squads`` (``mode`` of ``exclude``/``allow_only`` plus a squad list by name or UUID) to govern which internal squads see a host.
+- host - add ``override_sni_from_address`` and ``keep_sni_blank``, the SNI overrides a chain entry needs when the address it publishes is not the domain the exit node terminates TLS for.
+- host - add ``vless_route_id``, the route id a config profile's routing rules match on to send a host's traffic through a particular outbound or balancer. It takes an integer between 0 and 65535, and an empty string clears it.
+
 v1.0.2
 ======
 

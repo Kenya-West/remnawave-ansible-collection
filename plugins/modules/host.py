@@ -138,6 +138,52 @@ options:
       - Server description shown in some clients. Set to an empty string to
         clear it.
     type: str
+  vless_route_id:
+    description:
+      - VLESS route id advertised with this host, which the routing rules of
+        a config profile match on to send the host's traffic through a
+        particular outbound or balancer.
+      - An integer between 0 and 65535. Set to an empty string to clear it,
+        which leaves the host with no route id.
+    type: raw
+  override_sni_from_address:
+    description:
+      - Whether the panel derives the SNI from O(address) instead of using
+        O(sni) - what chain entries normally want, since the address they
+        publish is not the domain the exit node terminates TLS for.
+    type: bool
+  keep_sni_blank:
+    description:
+      - Whether to advertise an empty SNI rather than filling one in.
+    type: bool
+  exclude_from_subscription_types:
+    description:
+      - Subscription types this host is left out of. Authoritative when set;
+        an empty list puts the host back into every subscription type.
+    type: list
+    elements: str
+    choices: [XRAY_JSON, XRAY_BASE64, MIHOMO, STASH, CLASH, SINGBOX]
+  internal_squads:
+    description:
+      - Which internal squads see this host.
+      - Both suboptions are required together, and the squad list is
+        authoritative.
+    type: dict
+    suboptions:
+      mode:
+        description:
+          - V(exclude) hides the host from the listed squads, V(allow_only)
+            shows it to those squads alone.
+        type: str
+        choices: [exclude, allow_only]
+        required: true
+      squads:
+        description:
+          - Internal squads the mode applies to, by name or UUID. May be
+            empty.
+        type: list
+        elements: str
+        required: true
 seealso:
   - module: kenyawest.remnawave.host_info
   - module: kenyawest.remnawave.node
@@ -195,6 +241,28 @@ EXAMPLES = r'''
     address: "{{ item }}"
     state: disabled
   loop: "{{ retired_domains }}"
+
+- name: Publish a chain entry that routes to one exit by its VLESS route id
+  kenyawest.remnawave.host:
+    remark: Amsterdam via Belgrade
+    state: enabled
+    config_profile: default-profile
+    inbound: vless-reality
+    address: chain-rs-1.example.com
+    port: 443
+    vless_route_id: 400
+    override_sni_from_address: true
+    exclude_from_subscription_types:
+      - SINGBOX
+    internal_squads:
+      mode: exclude
+      squads:
+        - trial-squad
+
+- name: Take a host's route id away again
+  kenyawest.remnawave.host:
+    remark: Amsterdam via Belgrade
+    vless_route_id: ""
 '''
 
 RETURN = r'''
@@ -214,8 +282,32 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import 
     remnawave_argument_spec, resolve_for_check_mode,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
-    find_host, resolve_inbound_uuids, resolve_node_uuids,
+    find_host, resolve_inbound_uuids, resolve_internal_squad_uuids,
+    resolve_node_uuids,
 )
+
+
+def to_route_id(value):
+    """Normalize the vless_route_id option into an int or None.
+
+    Empty string clears the field, matching how the other nullable host
+    options are cleared.
+    """
+    if value is None or value == '':
+        return None
+    if isinstance(value, bool):
+        raise ValueError('vless_route_id must be an integer between 0 and '
+                         '65535, or an empty string to clear it')
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise ValueError('vless_route_id must be an integer between 0 and '
+                         '65535, or an empty string to clear it, got %r'
+                         % (value,))
+    if not 0 <= number <= 65535:
+        raise ValueError('vless_route_id must be between 0 and 65535, got %d'
+                         % number)
+    return number
 
 
 def build_fields(module, client):
@@ -233,6 +325,11 @@ def build_fields(module, client):
         FieldSpec('tags', 'tags', kind='set'),
         FieldSpec('server_description', 'serverDescription',
                   to_api=lambda v: v or None),
+        FieldSpec('vless_route_id', 'vlessRouteId', to_api=to_route_id),
+        FieldSpec('override_sni_from_address', 'overrideSniFromAddress'),
+        FieldSpec('keep_sni_blank', 'keepSniBlank'),
+        FieldSpec('exclude_from_subscription_types',
+                  'excludeFromSubscriptionTypes', kind='set'),
     ]
     resolved = dict(params)
 
@@ -253,6 +350,22 @@ def build_fields(module, client):
             lambda: resolve_node_uuids(client, params['nodes']),
             list(params['nodes']))
         fields.append(FieldSpec('nodes', 'nodes', kind='set'))
+
+    if params['internal_squads'] is not None:
+        squads = params['internal_squads']
+        resolved['internal_squads'] = {
+            'mode': squads['mode'].upper(),
+            'squads': sorted(resolve_for_check_mode(
+                module,
+                lambda: resolve_internal_squad_uuids(client, squads['squads']),
+                list(squads['squads']))),
+        }
+        fields.append(FieldSpec(
+            'internal_squads', 'internalSquads', kind='json',
+            from_api=lambda v: {
+                'mode': (v or {}).get('mode'),
+                'squads': sorted((v or {}).get('squads') or []),
+            }))
 
     if params['config_profile'] is not None or params['inbound'] is not None:
         if params['config_profile'] is None or params['inbound'] is None:
@@ -348,6 +461,18 @@ def main():
         hidden=dict(type='bool'),
         tags=dict(type='list', elements='str'),
         server_description=dict(type='str'),
+        vless_route_id=dict(type='raw'),
+        override_sni_from_address=dict(type='bool'),
+        keep_sni_blank=dict(type='bool'),
+        exclude_from_subscription_types=dict(
+            type='list', elements='str',
+            choices=['XRAY_JSON', 'XRAY_BASE64', 'MIHOMO', 'STASH', 'CLASH',
+                     'SINGBOX']),
+        internal_squads=dict(type='dict', options=dict(
+            mode=dict(type='str', choices=['exclude', 'allow_only'],
+                      required=True),
+            squads=dict(type='list', elements='str', required=True),
+        )),
     )
     module = AnsibleModule(
         argument_spec=argument_spec,

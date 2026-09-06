@@ -311,6 +311,13 @@ def make_host(body):
         'isHidden': body.get('isHidden', False),
         'tags': body.get('tags', []),
         'serverDescription': body.get('serverDescription'),
+        'vlessRouteId': body.get('vlessRouteId'),
+        'overrideSniFromAddress': body.get('overrideSniFromAddress', False),
+        'keepSniBlank': body.get('keepSniBlank', False),
+        'excludeFromSubscriptionTypes':
+            body.get('excludeFromSubscriptionTypes', []),
+        'internalSquads': body.get('internalSquads',
+                                   {'mode': 'EXCLUDE', 'squads': []}),
         'inbound': body.get('inbound', {}),
         'nodes': body.get('nodes', []),
     }

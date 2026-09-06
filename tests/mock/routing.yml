@@ -1,0 +1,187 @@
+---
+# Exercises the host options that drive Remnawave's VLESS routing: the
+# route id a config profile's rules match on, the SNI overrides a chain
+# entry needs, subscription-type exclusions and internal squad visibility.
+#
+# Covers: setting them on creation, idempotency, updating one of them in
+# isolation, order-insensitive comparison of the authoritative lists,
+# resolving squads by name, clearing the route id with an empty string,
+# and the range validation.
+- name: Host routing options
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+      token: test-token
+      api_key: sekret
+  tasks:
+    - name: Set up config profile
+      kenyawest.remnawave.config_profile:
+        name: routing-profile
+        config:
+          inbounds:
+            - tag: routing-inbound
+              protocol: vless
+              port: 443
+
+    - name: Set up the squads a host may be hidden from
+      kenyawest.remnawave.internal_squad:
+        name: "{{ item }}"
+        inbounds:
+          - profile: routing-profile
+            tag: routing-inbound
+      loop:
+        - routing-trial
+        - routing-paid
+
+    # --- creation with every routing option -------------------------------
+
+    - name: Create a chain entry carrying a route id
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        state: enabled
+        config_profile: routing-profile
+        inbound: routing-inbound
+        address: chain-1.routing.example.com
+        port: 443
+        vless_route_id: 400
+        override_sni_from_address: true
+        keep_sni_blank: false
+        exclude_from_subscription_types: [SINGBOX, CLASH]
+        internal_squads:
+          mode: exclude
+          squads: [routing-trial]
+      register: created
+
+    - name: The routing options reached the panel
+      ansible.builtin.assert:
+        that:
+          - created is changed
+          - created.host.vlessRouteId == 400
+          - created.host.overrideSniFromAddress
+          - not created.host.keepSniBlank
+          - created.host.excludeFromSubscriptionTypes | sort == ['CLASH', 'SINGBOX']
+          - created.host.internalSquads.mode == 'EXCLUDE'
+          - created.host.internalSquads.squads | length == 1
+        fail_msg: "unexpected created host: {{ created.host }}"
+
+    - name: Declaring the same host again, with the lists reordered
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        state: enabled
+        config_profile: routing-profile
+        inbound: routing-inbound
+        address: chain-1.routing.example.com
+        port: 443
+        vless_route_id: 400
+        override_sni_from_address: true
+        keep_sni_blank: false
+        exclude_from_subscription_types: [CLASH, SINGBOX]
+        internal_squads:
+          mode: exclude
+          squads: [routing-trial]
+      register: again
+
+    - name: Routing options are idempotent and list order does not matter
+      ansible.builtin.assert:
+        that:
+          - again is not changed
+
+    # --- updating one option in isolation ---------------------------------
+
+    - name: Move the host to another route id
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        vless_route_id: 401
+      register: moved
+
+    - name: Only the route id changed
+      ansible.builtin.assert:
+        that:
+          - moved is changed
+          - moved.host.vlessRouteId == 401
+          - moved.host.overrideSniFromAddress
+          - moved.host.excludeFromSubscriptionTypes | sort == ['CLASH', 'SINGBOX']
+
+    - name: Widen the squads the host is hidden from
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        internal_squads:
+          mode: allow_only
+          squads: [routing-paid, routing-trial]
+      register: resquadded
+
+    - name: The squad list is authoritative and names resolved to uuids
+      ansible.builtin.assert:
+        that:
+          - resquadded is changed
+          - resquadded.host.internalSquads.mode == 'ALLOW_ONLY'
+          - resquadded.host.internalSquads.squads | length == 2
+          - resquadded.host.internalSquads.squads
+            | select('match', '^[0-9a-f-]{36}$') | list | length == 2
+
+    # --- clearing the route id --------------------------------------------
+
+    - name: Take the route id away
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        vless_route_id: ""
+      register: cleared
+
+    - name: The host has no route id left
+      ansible.builtin.assert:
+        that:
+          - cleared is changed
+          - cleared.host.vlessRouteId is none
+
+    - name: Clearing it again is a no-op
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        vless_route_id: ""
+      register: cleared_again
+
+    - name: Clearing is idempotent
+      ansible.builtin.assert:
+        that:
+          - cleared_again is not changed
+
+    # --- validation --------------------------------------------------------
+
+    - name: Refuse a route id outside the panel's range
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        vless_route_id: 70000
+      register: too_big
+      ignore_errors: true
+
+    - name: The out-of-range value is rejected with a useful message
+      ansible.builtin.assert:
+        that:
+          - too_big is failed
+          - "'between 0 and 65535' in too_big.msg"
+        fail_msg: "out-of-range route id was accepted: {{ too_big }}"
+
+    - name: Refuse a route id that is not a number
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        vless_route_id: "four hundred"
+      register: not_a_number
+      ignore_errors: true
+
+    - name: The non-numeric value is rejected too
+      ansible.builtin.assert:
+        that:
+          - not_a_number is failed
+          - "'must be an integer' in not_a_number.msg"
+
+    - name: Read the host after the refused tasks
+      kenyawest.remnawave.host_info:
+        remark: chain-entry-1
+      register: untouched
+
+    - name: The refusals changed nothing
+      ansible.builtin.assert:
+        that:
+          - untouched.hosts[0].vlessRouteId is none

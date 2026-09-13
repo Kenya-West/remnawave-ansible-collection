@@ -1,0 +1,288 @@
+---
+# Exercises reading entities back: user_info's lookups and the query
+# parameters of both user listing endpoints, system_info's time zone, and
+# the role's remnawave_gather.
+#
+# The mock panel is shared with the other scenarios, so every filter here
+# is scoped to the gather-* users this play creates.
+- name: Reading entities
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    panel: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "{{ panel }}"
+      token: test-token
+      api_key: sekret
+  tasks:
+    - name: Set up the external squad
+      kenyawest.remnawave.external_squad:
+        name: gather-resellers
+
+    - name: Set up users
+      kenyawest.remnawave.user:
+        username: "{{ item.username }}"
+        state: "{{ item.state }}"
+        expire_at: "2027-01-01T00:00:00Z"
+        tag: "{{ item.tag }}"
+        telegram_id: "{{ item.telegram_id | default(omit) }}"
+        email: "{{ item.email | default(omit) }}"
+        traffic_limit_strategy: "{{ item.strategy }}"
+        external_squad: "{{ item.external_squad | default(omit) }}"
+      loop:
+        - {username: gather-alice, state: enabled, tag: GATHER_VIP,
+           telegram_id: 1001, strategy: month, external_squad: gather-resellers}
+        - {username: gather-bob, state: disabled, tag: GATHER_VIP,
+           email: bob@example.com, strategy: no_reset}
+        - {username: gather-carol, state: enabled, tag: GATHER_BASIC,
+           strategy: month}
+      loop_control:
+        label: "{{ item.username }}"
+
+    # --- lookups ------------------------------------------------------------
+
+    - name: Look a user up by username
+      kenyawest.remnawave.user_info:
+        username: gather-alice
+      register: by_username
+
+    - name: Look the same user up by id and by short uuid
+      kenyawest.remnawave.user_info:
+        id: "{{ by_username.users[0].id if lookup == 'id' else omit }}"
+        short_uuid: "{{ by_username.users[0].shortUuid if lookup == 'short_uuid' else omit }}"
+      loop: [id, short_uuid]
+      loop_control:
+        loop_var: lookup
+      register: by_other
+
+    - name: Look up a user id that does not exist
+      kenyawest.remnawave.user_info:
+        id: 99999
+      register: missing
+
+    - name: Every lookup finds the same user, and a missing one finds nothing
+      ansible.builtin.assert:
+        that:
+          - by_other.results | map(attribute='users') | map('first')
+            | map(attribute='username') | list == ['gather-alice', 'gather-alice']
+          - missing.users == []
+
+    # --- stream endpoint ----------------------------------------------------
+
+    - name: Filter by status and tag
+      kenyawest.remnawave.user_info:
+        status: active
+        tag: GATHER_VIP
+      register: active_vip
+
+    - name: Filter by the remaining stream parameters
+      kenyawest.remnawave.user_info:
+        telegram_id: "{{ item.telegram_id | default(omit) }}"
+        email: "{{ item.email | default(omit) }}"
+        traffic_limit_strategy: "{{ item.strategy | default(omit) }}"
+        external_squad: "{{ item.external_squad | default(omit) }}"
+        tag: "{{ item.tag | default(omit) }}"
+      loop:
+        - {telegram_id: 1001}
+        - {email: bob@example.com}
+        - {strategy: no_reset, tag: GATHER_VIP}
+        - {external_squad: gather-resellers}
+      register: stream_filters
+
+    - name: Stream filters select the right users
+      ansible.builtin.assert:
+        that:
+          - active_vip.users | map(attribute='username') | list == ['gather-alice']
+          - active_vip.next_cursor is not defined
+          - stream_filters.results | map(attribute='users') | map('first')
+            | map(attribute='username') | list
+            == ['gather-alice', 'gather-bob', 'gather-bob', 'gather-alice']
+          - stream_filters.results | map(attribute='users') | map('length') | list
+            == [1, 1, 1, 1]
+        fail_msg: "stream results: {{ stream_filters.results | map(attribute='users') | list }}"
+
+    - name: Fetch the first stream page of one user
+      kenyawest.remnawave.user_info:
+        tag: GATHER_VIP
+        size: 1
+      register: page1
+
+    - name: Fetch the next stream page
+      kenyawest.remnawave.user_info:
+        tag: GATHER_VIP
+        size: 1
+        cursor: "{{ page1.next_cursor }}"
+      register: page2
+
+    - name: Cursor pagination walks the stream
+      ansible.builtin.assert:
+        that:
+          - page1.users | map(attribute='username') | list == ['gather-alice']
+          - page1.has_more
+          - page1.next_cursor is string
+          - page2.users | map(attribute='username') | list == ['gather-bob']
+          - not page2.has_more
+          - page2.next_cursor is none
+
+    - name: Refuse an external squad that does not exist
+      kenyawest.remnawave.user_info:
+        external_squad: no-such-squad
+      register: no_squad
+      ignore_errors: true
+
+    # --- table endpoint -----------------------------------------------------
+
+    - name: Filter, sort and page through the table endpoint
+      kenyawest.remnawave.user_info:
+        filters:
+          - id: username
+            value: gather-
+        filter_modes:
+          username: contains
+        global_filter_mode: contains
+        sorting:
+          - id: username
+            desc: true
+        start: 0
+        size: 2
+      register: table
+
+    - name: Read the query string the panel received
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/last-query"
+        headers:
+          Authorization: Bearer test-token
+          X-Api-Key: sekret
+      register: received
+
+    - name: Read every page of the same table query
+      kenyawest.remnawave.user_info:
+        filters:
+          - id: username
+            value: gather-
+        filter_modes:
+          username: contains
+      register: table_all
+
+    - name: The table query is encoded the way the panel parses it
+      ansible.builtin.assert:
+        that:
+          - table.total == 3
+          - table.users | map(attribute='username') | list == ['gather-carol', 'gather-bob']
+          - "(received.json.filters | from_json) == [{'id': 'username', 'value': 'gather-'}]"
+          - "(received.json.filterModes | from_json) == {'username': 'contains'}"
+          - "(received.json.sorting | from_json) == [{'id': 'username', 'desc': true}]"
+          - received.json.globalFilterMode == 'contains'
+          - received.json.start == '0'
+          - received.json.size == '2'
+          - table_all.users | length == 3
+          - table_all.total is not defined
+        fail_msg: "panel received {{ received.json }}"
+
+    # --- validation ---------------------------------------------------------
+
+    - name: Refuse mixing stream and table parameters
+      kenyawest.remnawave.user_info:
+        status: active
+        sorting:
+          - id: username
+      register: mixed
+      ignore_errors: true
+
+    - name: Refuse a lookup combined with a filter
+      kenyawest.remnawave.user_info:
+        username: gather-alice
+        tag: GATHER_VIP
+      register: lookup_and_filter
+      ignore_errors: true
+
+    - name: Refuse a page size the panel does not allow
+      kenyawest.remnawave.user_info:
+        size: 1001
+      register: too_large
+      ignore_errors: true
+
+    - name: Invalid queries fail with useful messages
+      ansible.builtin.assert:
+        that:
+          - no_squad is failed
+          - "'not found' in no_squad.msg"
+          - mixed is failed
+          - "'cannot be combined' in mixed.msg"
+          - lookup_and_filter is failed
+          - "'mutually exclusive' in lookup_and_filter.msg"
+          - too_large is failed
+          - "'between 1 and 1000' in too_large.msg"
+
+    # --- system_info --------------------------------------------------------
+
+    - name: Gather bandwidth in a time zone
+      kenyawest.remnawave.system_info:
+        gather: [bandwidth]
+        timezone: Europe/Amsterdam
+      register: bandwidth
+
+    - name: The time zone reached the panel
+      ansible.builtin.assert:
+        that:
+          - bandwidth.bandwidth.tz == 'Europe/Amsterdam'
+
+    # --- the role -----------------------------------------------------------
+
+    - name: Read entities through the role, in check mode
+      ansible.builtin.include_role:
+        name: kenyawest.remnawave.remnawave
+        apply:
+          check_mode: true
+      vars:
+        remnawave_panel_url: "{{ panel }}"
+        remnawave_token: test-token
+        remnawave_api_key: sekret
+        remnawave_gather:
+          users:
+            tag: GATHER_VIP
+          external_squads:
+            name: gather-resellers
+          nodes:
+          subscription_settings: {}
+          system:
+            gather: [health]
+        apply:
+          check_mode: true
+
+    - name: The role published what was asked for, and nothing else
+      ansible.builtin.assert:
+        that:
+          - remnawave_gathered.keys() | sort
+            == ['external_squads', 'nodes', 'subscription_settings', 'system',
+                'users', 'users_page']
+          - remnawave_gathered.users | map(attribute='username') | sort
+            == ['gather-alice', 'gather-bob']
+          - remnawave_gathered.users_page == {}
+          - remnawave_gathered.external_squads | map(attribute='name') | list
+            == ['gather-resellers']
+          - remnawave_gathered.nodes is sequence
+          - "'randomizeHosts' in remnawave_gathered.subscription_settings"
+          - remnawave_gathered.system.keys() | list == ['health']
+        fail_msg: "gathered: {{ remnawave_gathered }}"
+
+    - name: Read one page of users through the role
+      ansible.builtin.include_role:
+        name: kenyawest.remnawave.remnawave
+      vars:
+        remnawave_panel_url: "{{ panel }}"
+        remnawave_token: test-token
+        remnawave_api_key: sekret
+        remnawave_gather:
+          users:
+            tag: GATHER_VIP
+            size: 1
+
+    - name: The page details are published with the users
+      ansible.builtin.assert:
+        that:
+          - remnawave_gathered.users | length == 1
+          - remnawave_gathered.users_page.has_more
+          - remnawave_gathered.users_page.next_cursor is string

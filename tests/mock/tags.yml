@@ -1,0 +1,249 @@
+---
+# Exercises the tags of config profiles and squads, which the panel sets
+# through a dedicated /tags endpoint rather than the create/update bodies,
+# plus the tag validation shared with nodes and hosts.
+#
+# Covers: tagging on creation, idempotency with reordered tags, check mode,
+# retagging an existing entity, tags alongside another change, clearing
+# with an empty list, leaving tags alone when the option is omitted, and
+# refusing tags the panel would reject.
+- name: Entity tags
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+      token: test-token
+      api_key: sekret
+  tasks:
+    # --- config profile ---------------------------------------------------
+
+    - name: Create a tagged config profile
+      kenyawest.remnawave.config_profile:
+        name: tags-profile
+        config:
+          inbounds:
+            - tag: tags-inbound
+              protocol: vless
+              port: 443
+        tags: [PRODUCTION, REGION:EU]
+      register: profile_created
+
+    - name: The profile carries its tags
+      ansible.builtin.assert:
+        that:
+          - profile_created is changed
+          - profile_created.profile.tags | sort == ['PRODUCTION', 'REGION:EU']
+        fail_msg: "unexpected profile: {{ profile_created.profile }}"
+
+    - name: Declare the same profile tags in another order
+      kenyawest.remnawave.config_profile:
+        name: tags-profile
+        tags: [REGION:EU, PRODUCTION]
+      register: profile_again
+
+    - name: Profile tags are idempotent regardless of order
+      ansible.builtin.assert:
+        that:
+          - profile_again is not changed
+
+    - name: Predict a retag in check mode
+      kenyawest.remnawave.config_profile:
+        name: tags-profile
+        tags: [STAGING]
+      check_mode: true
+      diff: true
+      register: profile_predicted
+
+    - name: Check mode predicts the change without applying it
+      ansible.builtin.assert:
+        that:
+          - profile_predicted is changed
+          - profile_predicted.diff.after.tags == ['STAGING']
+          - profile_predicted.profile.tags | sort == ['PRODUCTION', 'REGION:EU']
+
+    - name: Change the config and the tags at once
+      kenyawest.remnawave.config_profile:
+        name: tags-profile
+        config:
+          inbounds:
+            - tag: tags-inbound
+              protocol: vless
+              port: 8443
+        tags: [STAGING]
+      register: profile_both
+
+    - name: Both the config and the tags changed
+      ansible.builtin.assert:
+        that:
+          - profile_both is changed
+          - profile_both.profile.tags == ['STAGING']
+          - profile_both.profile.config.inbounds[0].port == 8443
+
+    - name: Change only the config, tags omitted
+      kenyawest.remnawave.config_profile:
+        name: tags-profile
+        config:
+          inbounds:
+            - tag: tags-inbound
+              protocol: vless
+              port: 443
+      register: profile_config_only
+
+    - name: Omitting tags leaves them alone
+      ansible.builtin.assert:
+        that:
+          - profile_config_only is changed
+          - profile_config_only.profile.tags == ['STAGING']
+
+    - name: Clear the profile tags
+      kenyawest.remnawave.config_profile:
+        name: tags-profile
+        tags: []
+      register: profile_cleared
+
+    - name: The profile has no tags left
+      ansible.builtin.assert:
+        that:
+          - profile_cleared is changed
+          - profile_cleared.profile.tags == []
+
+    # --- internal squad ---------------------------------------------------
+
+    - name: Create a tagged internal squad
+      kenyawest.remnawave.internal_squad:
+        name: tags-squad
+        inbounds:
+          - profile: tags-profile
+            tag: tags-inbound
+        tags: [PAID]
+      register: isq_created
+
+    - name: The internal squad carries its tags
+      ansible.builtin.assert:
+        that:
+          - isq_created is changed
+          - isq_created.squad.tags == ['PAID']
+
+    - name: Retag the internal squad without touching its inbounds
+      kenyawest.remnawave.internal_squad:
+        name: tags-squad
+        tags: [PAID, TRIAL]
+      register: isq_retagged
+
+    - name: Only the internal squad tags changed
+      ansible.builtin.assert:
+        that:
+          - isq_retagged is changed
+          - isq_retagged.squad.tags | sort == ['PAID', 'TRIAL']
+          - isq_retagged.squad.inbounds | length == 1
+
+    - name: Retag the internal squad again with the same tags
+      kenyawest.remnawave.internal_squad:
+        name: tags-squad
+        inbounds:
+          - profile: tags-profile
+            tag: tags-inbound
+        tags: [TRIAL, PAID]
+      register: isq_again
+
+    - name: Internal squad tags are idempotent
+      ansible.builtin.assert:
+        that:
+          - isq_again is not changed
+
+    # --- external squad ---------------------------------------------------
+
+    - name: Create an untagged external squad
+      kenyawest.remnawave.external_squad:
+        name: tags-resellers
+      register: esq_created
+
+    - name: Tag the existing external squad
+      kenyawest.remnawave.external_squad:
+        name: tags-resellers
+        tags: [PARTNER]
+      register: esq_tagged
+
+    - name: Declaring the external squad again
+      kenyawest.remnawave.external_squad:
+        name: tags-resellers
+        tags: [PARTNER]
+      register: esq_again
+
+    - name: External squad tags apply once
+      ansible.builtin.assert:
+        that:
+          - esq_created is changed
+          - esq_created.squad.tags == []
+          - esq_tagged is changed
+          - esq_tagged.squad.tags == ['PARTNER']
+          - esq_again is not changed
+
+    - name: Read the external squad back
+      kenyawest.remnawave.external_squad_info:
+        name: tags-resellers
+      register: esq_info
+
+    - name: The tags reached the panel
+      ansible.builtin.assert:
+        that:
+          - esq_info.squads[0].tags == ['PARTNER']
+        fail_msg: "unexpected info result: {{ esq_info }}"
+
+    # --- validation -------------------------------------------------------
+
+    - name: Refuse a lowercase tag
+      kenyawest.remnawave.external_squad:
+        name: tags-resellers
+        tags: [partner]
+      register: lowercase
+      ignore_errors: true
+
+    - name: Refuse a tag on a node too
+      kenyawest.remnawave.node:
+        name: tags-node
+        address: 203.0.113.99
+        config_profile: tags-profile
+        inbounds: [tags-inbound]
+        tags: [eu-west]
+      register: node_lowercase
+      ignore_errors: true
+
+    - name: Refuse more than ten tags
+      kenyawest.remnawave.internal_squad:
+        name: tags-squad
+        tags: [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11]
+      register: too_many
+      ignore_errors: true
+
+    - name: Refuse a tag longer than 36 characters
+      kenyawest.remnawave.config_profile:
+        name: tags-profile
+        tags: ["{{ 'A' * 37 }}"]
+      register: too_long
+      ignore_errors: true
+
+    - name: Invalid tags are rejected with useful messages
+      ansible.builtin.assert:
+        that:
+          - lowercase is failed
+          - "'uppercase letters' in lowercase.msg"
+          - node_lowercase is failed
+          - "'uppercase letters' in node_lowercase.msg"
+          - too_many is failed
+          - "'At most 10 tags' in too_many.msg"
+          - too_long is failed
+          - "'longer than 36' in too_long.msg"
+
+    - name: Read the squads after the refused tasks
+      kenyawest.remnawave.internal_squad:
+        name: tags-squad
+        tags: [PAID, TRIAL]
+      register: untouched
+
+    - name: The refusals changed nothing
+      ansible.builtin.assert:
+        that:
+          - untouched is not changed

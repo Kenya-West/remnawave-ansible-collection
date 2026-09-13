@@ -23,3 +23,9 @@ remnawave_users: []
 # Options for kenyawest.remnawave.subscription_settings; leave empty to not
 # manage subscription settings.
 remnawave_subscription_settings: {}
+# Entities to read back after the desired state is applied, published as the
+# remnawave_gathered fact. Keys: snippets, config_profiles, internal_squads,
+# external_squads, nodes, hosts, users, subscription_settings, system. A key
+# being present gathers that kind; its value holds the options of the
+# matching *_info module (empty or null means "all"). Empty gathers nothing.
+remnawave_gather: {}

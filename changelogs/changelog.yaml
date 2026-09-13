@@ -111,3 +111,31 @@ releases:
     fragments:
     - host-vless-routing.yml
     release_date: '2026-09-06'
+  1.2.0:
+    changes:
+      minor_changes:
+      - config_profile - add ``tags``, authoritative when set, applied through the
+        panel's dedicated tags endpoint.
+      - external_squad - add ``tags``, authoritative when set, so existing squads
+        can be retagged as well as created tagged.
+      - internal_squad - add ``tags``, authoritative when set, applied through the
+        panel's dedicated tags endpoint.
+      - node, host - validate ``tags`` against the panel's format (at most 10 tags
+        of up to 36 uppercase letters, digits, underscores and colons) before sending
+        anything, failing with a message that names the offending tag.
+      - remnawave role - add ``remnawave_gather`` to read entities back after the
+        desired state is applied, published as the ``remnawave_gathered`` fact.
+      - remnawave role - pass ``tags`` through for ``remnawave_config_profiles``,
+        ``remnawave_internal_squads`` and ``remnawave_external_squads``.
+      - system_info - add ``timezone``, sent as the bandwidth statistics' ``tz`` query
+        parameter.
+      - user_info - add lookups by ``id`` and ``short_uuid``.
+      - user_info - add the stream endpoint's filters ``status``, ``traffic_limit_strategy``,
+        ``telegram_id``, ``email``, ``tag`` and ``external_squad`` (by name or UUID),
+        with ``cursor`` pagination returning ``next_cursor`` and ``has_more``.
+      - user_info - add the table endpoint's ``filters``, ``filter_modes``, ``global_filter_mode``
+        and ``sorting``, with ``start``/``size`` pagination returning ``total``.
+    fragments:
+    - entity-tags.yml
+    - read-entities.yml
+    release_date: '2026-09-14'

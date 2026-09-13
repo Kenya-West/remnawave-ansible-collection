@@ -16,7 +16,7 @@ import unittest
 
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
     FieldSpec, build_patch, desired_enabled, is_uuid, parse_traffic_limit,
-    times_equal,
+    tags_differ, times_equal, validate_tags,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
     hosts_linked_to_node,
@@ -81,6 +81,46 @@ class TestIsUuid(unittest.TestCase):
         self.assertFalse(is_uuid('alice'))
         self.assertFalse(is_uuid(None))
         self.assertFalse(is_uuid(42))
+
+
+class TestValidateTags(unittest.TestCase):
+
+    def test_valid_tags_pass_through(self):
+        self.assertEqual(validate_tags(['PROD', 'REGION:EU', 'A_1']),
+                         ['PROD', 'REGION:EU', 'A_1'])
+        self.assertEqual(validate_tags([]), [])
+        self.assertIsNone(validate_tags(None))
+
+    def test_lowercase_rejected_not_rewritten(self):
+        with self.assertRaises(ValueError):
+            validate_tags(['prod'])
+
+    def test_forbidden_characters_rejected(self):
+        for tag in ('EU-WEST', 'TWO WORDS', ''):
+            with self.assertRaises(ValueError):
+                validate_tags([tag])
+
+    def test_length_limits(self):
+        validate_tags(['A' * 36])
+        with self.assertRaises(ValueError):
+            validate_tags(['A' * 37])
+        validate_tags(['T%d' % i for i in range(10)])
+        with self.assertRaises(ValueError):
+            validate_tags(['T%d' % i for i in range(11)])
+
+
+class TestTagsDiffer(unittest.TestCase):
+
+    def test_unset_option_never_differs(self):
+        self.assertFalse(tags_differ(None, ['PROD']))
+
+    def test_order_and_duplicates_ignored(self):
+        self.assertFalse(tags_differ(['B', 'A', 'A'], ['A', 'B']))
+
+    def test_missing_current_tags_count_as_empty(self):
+        self.assertFalse(tags_differ([], None))
+        self.assertTrue(tags_differ(['A'], None))
+        self.assertTrue(tags_differ([], ['A']))
 
 
 class TestDesiredEnabled(unittest.TestCase):

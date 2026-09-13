@@ -130,7 +130,10 @@ options:
     type: bool
   tags:
     description:
-      - Tags of the host. Authoritative when set.
+      - Tags of the host. Authoritative when set; an empty list removes
+        every tag.
+      - At most 10 tags, each up to 36 characters of uppercase letters,
+        digits, underscores and colons.
     type: list
     elements: str
   server_description:
@@ -279,7 +282,7 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import 
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
     STATE_CHOICES, FieldSpec, build_patch, desired_enabled, exit_with_change,
-    remnawave_argument_spec, resolve_for_check_mode,
+    remnawave_argument_spec, resolve_for_check_mode, validate_tags,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
     find_host, resolve_inbound_uuids, resolve_internal_squad_uuids,
@@ -322,7 +325,7 @@ def build_fields(module, client):
         FieldSpec('fingerprint', 'fingerprint', to_api=lambda v: v or None),
         FieldSpec('security_layer', 'securityLayer', to_api=lambda v: v.upper()),
         FieldSpec('hidden', 'isHidden'),
-        FieldSpec('tags', 'tags', kind='set'),
+        FieldSpec('tags', 'tags', kind='set', to_api=validate_tags),
         FieldSpec('server_description', 'serverDescription',
                   to_api=lambda v: v or None),
         FieldSpec('vless_route_id', 'vlessRouteId', to_api=to_route_id),

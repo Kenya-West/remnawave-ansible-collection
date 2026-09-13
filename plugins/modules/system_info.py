@@ -34,6 +34,12 @@ options:
     elements: str
     choices: [health, stats, bandwidth, nodes_statistics, metadata]
     default: [health]
+  timezone:
+    description:
+      - Time zone the V(bandwidth) statistics are bucketed in, for example
+        V(Europe/Amsterdam). The panel's own default applies when omitted.
+    type: str
+    version_added: 1.2.0
 '''
 
 EXAMPLES = r'''
@@ -89,6 +95,10 @@ PATHS = {
     'nodes_statistics': '/api/system/stats/nodes',
     'metadata': '/api/system/metadata',
 }
+# Query parameter each subject accepts, keyed by the option supplying it.
+QUERY = {
+    'bandwidth': {'tz': 'timezone'},
+}
 
 
 def main():
@@ -96,6 +106,7 @@ def main():
     argument_spec.update(
         gather=dict(type='list', elements='str', default=['health'],
                     choices=sorted(PATHS)),
+        timezone=dict(type='str'),
     )
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
@@ -103,7 +114,9 @@ def main():
     result = dict(changed=False)
     try:
         for subject in module.params['gather']:
-            result[subject] = client.get(PATHS[subject])
+            query = dict((name, module.params[option])
+                         for name, option in QUERY.get(subject, {}).items())
+            result[subject] = client.get(PATHS[subject], query=query)
         module.exit_json(**result)
     except RemnawaveApiError as exc:
         module.fail_json(msg=str(exc), status=exc.status, error_code=exc.error_code)

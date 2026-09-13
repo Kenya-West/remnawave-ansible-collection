@@ -16,6 +16,7 @@ import re
 import sys
 import uuid as uuidlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qsl, urlsplit
 
 TOKEN = os.environ.get('MOCK_TOKEN', 'test-token')
 API_KEY = os.environ.get('MOCK_API_KEY')
@@ -230,6 +231,31 @@ esq_list, esq_create, esq_update, esq_delete = collection_handlers(
                'viewPosition': 0, 'info': {'membersCount': 0}})
 
 
+TAGS_STORES = {
+    'config-profiles': 'config_profiles',
+    'internal-squads': 'internal_squads',
+    'external-squads': 'external_squads',
+}
+TAG_RE = re.compile(r'^[A-Z0-9_:]{1,36}$')
+
+
+def set_tags(handler, collection):
+    """PATCH /api/<collection>/tags, validated like the real panel."""
+    body = handler.read_body()
+    item = DB[TAGS_STORES[collection]].get(body.get('uuid'))
+    if not item:
+        handler.not_found()
+        return
+    tags = body.get('tags')
+    if (not isinstance(tags, list) or len(tags) > 10
+            or not all(isinstance(t, str) and TAG_RE.match(t) for t in tags)):
+        handler.reply(400, {'message': 'Validation failed',
+                            'errorCode': 'VALIDATION_ERROR'}, envelope=False)
+        return
+    item['tags'] = tags
+    handler.reply(200, {'uuid': item['uuid'], 'tags': tags})
+
+
 def make_node(body):
     profile = body.get('configProfile', {})
     node = {
@@ -400,9 +426,81 @@ def user_update(handler):
     handler.reply(200, user_view(user))
 
 
+def remember_query(handler):
+    """Parse and record the query string, so tests can assert its encoding."""
+    query = dict(parse_qsl(urlsplit(handler.path).query))
+    DB['last_query'] = query
+    return query
+
+
 def user_list(handler):
+    """Offset pagination, with the table filters and sorting as JSON strings."""
+    query = remember_query(handler)
     users = [user_view(u) for u in DB['users'].values()]
-    handler.reply(200, {'total': len(users), 'users': users})
+    for flt in json.loads(query.get('filters', '[]')):
+        mode = json.loads(query.get('filterModes', '{}')).get(flt['id'], 'equals')
+        if mode == 'contains':
+            users = [u for u in users
+                     if str(flt['value']) in str(u.get(flt['id']))]
+        else:
+            users = [u for u in users if u.get(flt['id']) == flt['value']]
+    for sort in reversed(json.loads(query.get('sorting', '[]'))):
+        users.sort(key=lambda u: str(u.get(sort['id'])), reverse=sort['desc'])
+    start = int(query.get('start', 0))
+    size = int(query.get('size', 25))
+    handler.reply(200, {'total': len(users), 'users': users[start:start + size]})
+
+
+STREAM_FILTERS = ('status', 'trafficLimitStrategy', 'email', 'tag',
+                  'externalSquadUuid')
+
+
+def user_stream(handler):
+    """Keyset pagination by id; the cursor is the last id of the page."""
+    query = remember_query(handler)
+    users = sorted((user_view(u) for u in DB['users'].values()),
+                   key=lambda u: u['id'])
+    for key in STREAM_FILTERS:
+        if key in query:
+            users = [u for u in users if u.get(key) == query[key]]
+    if 'telegramId' in query:
+        users = [u for u in users
+                 if str(u.get('telegramId')) == query['telegramId']]
+    if 'cursor' in query:
+        users = [u for u in users if u['id'] > int(query['cursor'])]
+    size = int(query.get('size', 250))
+    page = users[:size]
+    has_more = len(users) > size
+    handler.reply(200, {
+        'users': page, 'hasMore': has_more,
+        'nextCursor': str(page[-1]['id']) if has_more else None,
+    })
+
+
+def user_by_id(handler, user_id):
+    user = DB['users'].get(int(user_id))
+    if not user:
+        handler.not_found()
+        return
+    handler.reply(200, user_view(user))
+
+
+def user_by_short_uuid(handler, short_uuid):
+    for user in DB['users'].values():
+        if user['shortUuid'] == short_uuid:
+            handler.reply(200, user_view(user))
+            return
+    handler.not_found()
+
+
+def last_query(handler):
+    """Test-only endpoint: the query string of the last users listing."""
+    handler.reply(200, DB.get('last_query'), envelope=False)
+
+
+def system_bandwidth(handler):
+    query = remember_query(handler)
+    handler.reply(200, {'tz': query.get('tz'), 'bandwidthLastTwoDays': {}})
 
 
 def user_by_username(handler, username):
@@ -489,6 +587,8 @@ def health(handler):
 
 UUID = r'[0-9a-f-]{36}'
 ROUTES = [
+    (r'PATCH /api/(config-profiles|internal-squads|external-squads)/tags',
+     set_tags),
     (r'GET /api/config-profiles', cp_list),
     (r'POST /api/config-profiles', cp_create),
     (r'PATCH /api/config-profiles', cp_update_config),
@@ -515,7 +615,12 @@ ROUTES = [
     (r'POST /api/users', user_create),
     (r'PATCH /api/users', user_update),
     (r'GET /api/users', user_list),
+    (r'GET /api/users/stream', user_stream),
+    (r'GET /api/users/(\d+)', user_by_id),
+    (r'GET /api/users/by-short-uuid/([^/]+)', user_by_short_uuid),
     (r'GET /api/users/by-username/([^/]+)', user_by_username),
+    (r'GET /api/_test/last-query', last_query),
+    (r'GET /api/system/stats/bandwidth', system_bandwidth),
     (r'DELETE /api/users/(\d+)', user_delete),
     (r'POST /api/snippets/actions/sync', snippet_sync),
     (r'GET /api/snippets', snippet_list),

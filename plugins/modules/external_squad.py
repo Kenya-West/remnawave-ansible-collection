@@ -11,7 +11,8 @@ DOCUMENTATION = r'''
 module: external_squad
 short_description: Manage Remnawave external squads
 description:
-  - Create and delete external squads of a Remnawave panel.
+  - Create and delete external squads of a Remnawave panel, and manage
+    their tags.
   - Squads are identified by their C(name). Users are assigned to an external
     squad through M(kenyawest.remnawave.user).
   - Advanced per-squad settings (templates, host overrides, response headers
@@ -41,6 +42,15 @@ options:
     type: str
     choices: [present, absent]
     default: present
+  tags:
+    description:
+      - Tags of the squad. Authoritative when set; an empty list removes
+        every tag.
+      - At most 10 tags, each up to 36 characters of uppercase letters,
+        digits, underscores and colons.
+    type: list
+    elements: str
+    version_added: 1.2.0
 seealso:
   - module: kenyawest.remnawave.external_squad_info
   - module: kenyawest.remnawave.user
@@ -53,6 +63,8 @@ EXAMPLES = r'''
     token: "{{ remnawave_token }}"
     name: resellers
     state: present
+    tags:
+      - PARTNER
 '''
 
 RETURN = r'''
@@ -68,10 +80,10 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import 
     RemnawaveApiError, RemnawaveClient,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
-    exit_with_change, remnawave_argument_spec,
+    exit_with_change, remnawave_argument_spec, tags_differ, validate_tags,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
-    find_external_squad,
+    find_external_squad, set_tags,
 )
 
 
@@ -87,14 +99,30 @@ def run(module, client):
             client.delete('/api/external-squads/%s' % current['uuid'])
         exit_with_change(module, {'name': name}, {})
 
-    if current is not None:
+    tags = validate_tags(params['tags'])
+
+    if current is None:
+        payload = {'name': name}
+        after = dict(payload)
+        if tags:
+            after['tags'] = tags
+        if module.check_mode:
+            exit_with_change(module, {}, after, squad=after)
+        created = client.post('/api/external-squads', payload)
+        # Tags are not part of the create body; they have their own endpoint.
+        if tags:
+            created = set_tags(client, 'external-squads', created, tags)
+        exit_with_change(module, {}, after, squad=created)
+
+    if not tags_differ(tags, current.get('tags')):
         module.exit_json(changed=False, squad=current)
 
-    payload = {'name': name}
+    before = {'tags': current.get('tags') or []}
+    after = {'tags': tags}
     if module.check_mode:
-        exit_with_change(module, {}, payload, squad=payload)
-    created = client.post('/api/external-squads', payload)
-    exit_with_change(module, {}, payload, squad=created)
+        exit_with_change(module, before, after, squad=current)
+    updated = set_tags(client, 'external-squads', current, tags)
+    exit_with_change(module, before, after, squad=updated)
 
 
 def main():
@@ -102,6 +130,7 @@ def main():
     argument_spec.update(
         name=dict(type='str', required=True),
         state=dict(type='str', choices=['present', 'absent'], default='present'),
+        tags=dict(type='list', elements='str'),
     )
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
@@ -110,6 +139,8 @@ def main():
         run(module, client)
     except RemnawaveApiError as exc:
         module.fail_json(msg=str(exc), status=exc.status, error_code=exc.error_code)
+    except ValueError as exc:
+        module.fail_json(msg=str(exc))
 
 
 if __name__ == '__main__':

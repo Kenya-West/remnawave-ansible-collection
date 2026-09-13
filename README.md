@@ -51,7 +51,7 @@ only the Python standard library.
 
 | Module | Purpose |
 | --- | --- |
-| `user`, `user_info` | Panel users: expiration, traffic limits, squad membership, enable/disable |
+| `user`, `user_info` | Panel users: expiration, traffic limits, squad membership, enable/disable; server-side filtering, sorting and pagination when reading |
 | `node`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, cascade onto linked hosts |
 | `host`, `host_info` | Subscription hosts: address, SNI, transport parameters, VLESS route id, node binding, subscription and squad visibility. Addressable by remark or by domain (`identify_by`) |
 | `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative) |
@@ -66,6 +66,25 @@ Every state module supports check mode (`--check`) and diff mode (`--diff`)
 and only manages the options you set: omitted options are left untouched on
 the panel. List-valued options (`internal_squads`, `inbounds`, `tags`,
 `nodes`) are authoritative when set.
+
+### Tags
+
+`config_profile`, `internal_squad`, `external_squad`, `node` and `host`
+accept an optional `tags` list, authoritative when set and compared
+regardless of order; an empty list removes every tag. The panel allows up to
+10 tags per entity, each at most 36 characters of uppercase letters, digits,
+`_` and `:`. Tags outside that format fail the task before any request is
+made, and are not uppercased for you.
+
+```yaml
+- name: Tag a config profile
+  kenyawest.remnawave.config_profile:
+    name: default-profile
+    tags: [PRODUCTION, REGION:EU]
+```
+
+`user` is the exception: the panel gives a user a single `tag` string (up to
+16 characters, no `:`), so that option stays a string.
 
 ### The `state` property
 
@@ -234,6 +253,15 @@ The `remnawave` role applies a whole desired state described by variables
 `remnawave_external_squads`, `remnawave_subscription_settings`) in dependency
 order, with usage, per-entry option tables and worked examples in
 [roles/remnawave/README.md](roles/remnawave/README.md).
+
+It can also read entities back: `remnawave_gather` names the kinds to read,
+with the options of the matching `*_info` module, and the result is published
+as the `remnawave_gathered` fact. `user_info` exposes every query parameter
+of the panel's two user listings - status, traffic strategy, Telegram id,
+e-mail, tag and external squad filters with cursor pagination, or table
+filters, filter modes and sorting with offset pagination - besides lookups by
+username, id and short UUID. The other entity listings take no query
+parameters in the API, so their info modules filter by name client-side.
 
 ## Installation
 

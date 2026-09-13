@@ -103,6 +103,21 @@ def find_external_squad(client, name_or_uuid, required=False):
     return matches[0]
 
 
+def set_tags(client, collection, entity, tags):
+    """Replace the tags of a config profile or squad; returns the entity.
+
+    Unlike nodes and hosts, these entities do not take tags in their
+    create and update bodies - the panel has a dedicated endpoint per
+    collection (``config-profiles``, ``internal-squads``,
+    ``external-squads``) that answers with just the uuid and the new tags.
+    """
+    data = client.patch('/api/%s/tags' % collection,
+                        {'uuid': entity['uuid'], 'tags': tags})
+    updated = dict(entity)
+    updated['tags'] = (data or {}).get('tags', tags)
+    return updated
+
+
 def list_nodes(client):
     return client.get('/api/nodes') or []
 

@@ -51,6 +51,16 @@ options:
       - Required when the squad does not exist yet.
     type: list
     elements: raw
+  tags:
+    description:
+      - Tags of the squad. Authoritative when set; an empty list removes
+        every tag.
+      - At most 10 tags, each up to 36 characters of uppercase letters,
+        digits, underscores and colons.
+      - Not to be confused with the inbound C(tag) inside O(inbounds).
+    type: list
+    elements: str
+    version_added: 1.2.0
 seealso:
   - module: kenyawest.remnawave.internal_squad_info
   - module: kenyawest.remnawave.user
@@ -66,6 +76,8 @@ EXAMPLES = r'''
     inbounds:
       - profile: default-profile
         tag: vless-reality
+    tags:
+      - PAID
 
 - name: Remove a squad
   kenyawest.remnawave.internal_squad:
@@ -89,9 +101,10 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import 
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
     exit_with_change, is_uuid, remnawave_argument_spec, resolve_for_check_mode,
+    tags_differ, validate_tags,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
-    find_internal_squad, resolve_inbound_uuids,
+    find_internal_squad, resolve_inbound_uuids, set_tags,
 )
 
 
@@ -126,6 +139,7 @@ def run(module, client):
             client.delete('/api/internal-squads/%s' % current['uuid'])
         exit_with_change(module, {'name': name}, {})
 
+    tags = validate_tags(params['tags'])
     desired_uuids = None
     if params['inbounds'] is not None:
         desired_uuids = resolve_inbounds(module, client, params['inbounds'])
@@ -135,23 +149,42 @@ def run(module, client):
             module.fail_json(
                 msg='inbounds is required when creating internal squad %r' % name)
         payload = {'name': name, 'inbounds': desired_uuids}
+        after = dict(payload)
+        if tags:
+            after['tags'] = tags
         if module.check_mode:
-            exit_with_change(module, {}, payload, squad=payload)
+            exit_with_change(module, {}, after, squad=after)
         created = client.post('/api/internal-squads', payload)
-        exit_with_change(module, {}, payload, squad=created)
+        # Tags are not part of the create body; they have their own endpoint.
+        if tags:
+            created = set_tags(client, 'internal-squads', created, tags)
+        exit_with_change(module, {}, after, squad=created)
 
+    before, after = {}, {}
     current_uuids = sorted(i.get('uuid') for i in (current.get('inbounds') or []))
-    if desired_uuids is None or sorted(set(desired_uuids)) == current_uuids:
-        module.exit_json(changed=False, squad=current)
+    inbounds_changed = (desired_uuids is not None
+                        and sorted(set(desired_uuids)) != current_uuids)
+    if inbounds_changed:
+        before['inbounds'] = current_uuids
+        after['inbounds'] = sorted(set(desired_uuids))
+    tags_changed = tags_differ(tags, current.get('tags'))
+    if tags_changed:
+        before['tags'] = current.get('tags') or []
+        after['tags'] = tags
 
-    before = {'inbounds': current_uuids}
-    after = {'inbounds': sorted(set(desired_uuids))}
+    if not inbounds_changed and not tags_changed:
+        module.exit_json(changed=False, squad=current)
     if module.check_mode:
         exit_with_change(module, before, after, squad=current)
-    updated = client.patch(
-        '/api/internal-squads',
-        {'uuid': current['uuid'], 'inbounds': desired_uuids})
-    exit_with_change(module, before, after, squad=updated)
+
+    squad = current
+    if inbounds_changed:
+        squad = client.patch(
+            '/api/internal-squads',
+            {'uuid': current['uuid'], 'inbounds': desired_uuids})
+    if tags_changed:
+        squad = set_tags(client, 'internal-squads', squad or current, tags)
+    exit_with_change(module, before, after, squad=squad)
 
 
 def main():
@@ -160,6 +193,7 @@ def main():
         name=dict(type='str', required=True),
         state=dict(type='str', choices=['present', 'absent'], default='present'),
         inbounds=dict(type='list', elements='raw'),
+        tags=dict(type='list', elements='str'),
     )
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
@@ -168,6 +202,8 @@ def main():
         run(module, client)
     except RemnawaveApiError as exc:
         module.fail_json(msg=str(exc), status=exc.status, error_code=exc.error_code)
+    except ValueError as exc:
+        module.fail_json(msg=str(exc))
 
 
 if __name__ == '__main__':

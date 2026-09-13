@@ -29,6 +29,14 @@ UUID_RE = re.compile(
 STATE_CHOICES = ['present', 'absent', 'enabled', 'disabled']
 
 
+# The panel's limits for the tags of nodes, hosts, config profiles and
+# squads. Checked up front so a bad tag fails the task with a message that
+# names it, rather than with the panel's generic validation error.
+TAG_RE = re.compile(r'^[A-Z0-9_:]+$')
+MAX_TAGS = 10
+MAX_TAG_LENGTH = 36
+
+
 def desired_enabled(state):
     """Return True/False when a state pins enabled-ness, else None.
 
@@ -77,6 +85,40 @@ def parse_traffic_limit(value):
     if isinstance(value, (int, float)):
         return int(value)
     return int(human_to_bytes(value))
+
+
+def validate_tags(tags):
+    """Check a tags option against the panel's limits; returns it as a list.
+
+    Tags are not uppercased on the user's behalf: the panel stores exactly
+    what it is sent, so a silently rewritten tag would never match the
+    playbook that declared it.
+    """
+    if tags is None:
+        return None
+    if len(tags) > MAX_TAGS:
+        raise ValueError('At most %d tags are allowed, got %d'
+                         % (MAX_TAGS, len(tags)))
+    for tag in tags:
+        if not isinstance(tag, str) or not TAG_RE.match(tag):
+            raise ValueError(
+                'Tag %r is invalid: tags may contain only uppercase letters, '
+                'digits, underscores and colons' % (tag,))
+        if len(tag) > MAX_TAG_LENGTH:
+            raise ValueError('Tag %r is longer than %d characters'
+                             % (tag, MAX_TAG_LENGTH))
+    return list(tags)
+
+
+def tags_differ(desired, current):
+    """Whether an authoritative tags option would change the stored tags.
+
+    None means the option is unset, which never changes anything. Order
+    and duplicates are irrelevant to the panel.
+    """
+    if desired is None:
+        return False
+    return sorted(set(desired)) != sorted(set(current or []))
 
 
 def parse_iso_time(value):

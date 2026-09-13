@@ -5,6 +5,7 @@ argument_specs:
     description:
       - Applies the desired state described by the C(remnawave_*) variables to a Remnawave panel, in dependency order (config profiles, squads, nodes, hosts,
         users, subscription settings).
+      - Optionally reads entities back afterwards (C(remnawave_gather)) into the C(remnawave_gathered) fact.
       - Every list item accepts the options of the corresponding module of this collection; only C(name)/C(username)/C(remark) is mandatory per item.
       - The whole role can be run with C(--check) (and C(--diff)).
     options:
@@ -75,3 +76,40 @@ argument_specs:
         default: {}
         description:
           - Options of kenyawest.remnawave.subscription_settings. An empty dict means subscription settings are not managed.
+      remnawave_gather:
+        type: dict
+        default: {}
+        description:
+          - Entity kinds to read back once the desired state is applied, published as the C(remnawave_gathered) fact.
+          - A kind is gathered when its key is present. Its value holds the options of the matching info module and may be empty or null to
+            read everything.
+          - An empty dict gathers nothing, and C(remnawave_gathered) is then not set.
+        options:
+          snippets:
+            type: dict
+            description: Options of kenyawest.remnawave.snippet_info (C(name)).
+          config_profiles:
+            type: dict
+            description: Options of kenyawest.remnawave.config_profile_info (C(name)).
+          internal_squads:
+            type: dict
+            description: Options of kenyawest.remnawave.internal_squad_info (C(name)).
+          external_squads:
+            type: dict
+            description: Options of kenyawest.remnawave.external_squad_info (C(name)).
+          nodes:
+            type: dict
+            description: Options of kenyawest.remnawave.node_info (C(name)).
+          hosts:
+            type: dict
+            description: Options of kenyawest.remnawave.host_info (C(remark) or C(address)).
+          users:
+            type: dict
+            description:
+              - Options of kenyawest.remnawave.user_info - lookups, stream filters, table filters, sorting and pagination.
+          subscription_settings:
+            type: dict
+            description: Presence reads the subscription settings; the value is ignored.
+          system:
+            type: dict
+            description: Options of kenyawest.remnawave.system_info (C(gather), C(timezone)).

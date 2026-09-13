@@ -1,0 +1,5 @@
+{
+  "terminal.integrated.env.linux": {
+    "ANSIBLE_COLLECTIONS_PATH": "${env:HOME}/dev"
+  },
+}

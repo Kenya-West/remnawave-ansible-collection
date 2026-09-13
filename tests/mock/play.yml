@@ -29,15 +29,18 @@
             - tag: ss-inbound
               protocol: shadowsocks
               port: 8388
+        tags: [PRODUCTION]
 
     remnawave_internal_squads:
       - name: default-squad
         inbounds:
           - profile: default-profile
             tag: vless-reality
+        tags: [PAID, REGION:EU]
 
     remnawave_external_squads:
       - name: resellers
+        tags: [PARTNER]
 
     remnawave_nodes:
       - name: nl-ams-1

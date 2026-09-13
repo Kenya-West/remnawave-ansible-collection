@@ -18,6 +18,7 @@ and you want a single `ansible-playbook` run to reconcile it.
   - [Connection](#connection)
   - [Desired state](#desired-state)
 - [Entry keys per stage](#entry-keys-per-stage)
+- [Reading entities back](#reading-entities-back)
 - [Usage](#usage)
   - [Minimal playbook](#minimal-playbook)
   - [Dry run first](#dry-run-first)
@@ -49,6 +50,8 @@ reference names created by the previous ones:
 6. hosts (`remnawave_hosts`)
 7. users (`remnawave_users`)
 8. subscription settings (`remnawave_subscription_settings`)
+9. reading entities back (`remnawave_gather`), see
+   [Reading entities back](#reading-entities-back)
 
 Each stage is skipped when its variable is empty, which is the default. So a
 play that sets only `remnawave_users` manages only users and never looks at
@@ -102,6 +105,7 @@ the play - the modules fall back to them.
 | `remnawave_hosts` | list of dict | `[]` | `kenyawest.remnawave.host` |
 | `remnawave_users` | list of dict | `[]` | `kenyawest.remnawave.user` |
 | `remnawave_subscription_settings` | dict | `{}` | `kenyawest.remnawave.subscription_settings` (a single entity, not a list) |
+| `remnawave_gather` | dict | `{}` | Not desired state: which entities to read back afterwards. See [Reading entities back](#reading-entities-back). |
 
 Within a list item, only the identifier is mandatory (`name`, `remark` or
 `username`); every other key is optional and simply not sent when omitted,
@@ -129,6 +133,7 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | `name` | str | Required. Identifier. |
 | `state` | str | `present` (default) or `absent`. |
 | `config` | dict or JSON str | The Xray configuration. Authoritative: the panel's stored config is made exactly equal to it. Required when the profile does not exist yet. |
+| `tags` | list of str | Authoritative when set. See [tag format](#behaviour-worth-knowing). |
 
 **`remnawave_internal_squads`** - squads users are assigned to.
 
@@ -137,6 +142,7 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | `name` | str | Required. Identifier. |
 | `state` | str | `present` (default) or `absent`. |
 | `inbounds` | list | Authoritative when set. Each item is either `{profile: <profile name>, tag: <inbound tag>}` or a plain inbound UUID. Required when the squad does not exist yet. |
+| `tags` | list of str | Tags of the squad itself, unrelated to the inbound `tag` above. Authoritative when set. |
 
 **`remnawave_external_squads`** - external squads.
 
@@ -144,6 +150,7 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | --- | --- | --- |
 | `name` | str | Required. Identifier. |
 | `state` | str | `present` (default) or `absent`. |
+| `tags` | list of str | Authoritative when set. |
 
 **`remnawave_nodes`**
 
@@ -216,6 +223,61 @@ non-empty.
 | `randomize_hosts` | bool | |
 | `response_rules` | dict or JSON str | Shape defined by the panel. |
 | `hwid_settings` | dict or JSON str | Shape defined by the panel. |
+
+## Reading entities back
+
+`remnawave_gather` makes the role read entities from the panel after the
+management stages, and publish them as the `remnawave_gathered` fact for the
+rest of the play. Reads never change anything, run under `--check` too, and
+reflect the panel as this run left it. Set only `remnawave_gather` to use the
+role purely for reading.
+
+A kind is read when its key is present. Its value holds the options of the
+matching info module; leave it empty (or `{}`) to read everything.
+
+| Key | Options (of the module) | Published as |
+| --- | --- | --- |
+| `snippets` | `name` (`snippet_info`) | `remnawave_gathered.snippets` |
+| `config_profiles` | `name` (`config_profile_info`) | `remnawave_gathered.config_profiles` |
+| `internal_squads` | `name` (`internal_squad_info`) | `remnawave_gathered.internal_squads` |
+| `external_squads` | `name` (`external_squad_info`) | `remnawave_gathered.external_squads` |
+| `nodes` | `name` (`node_info`) | `remnawave_gathered.nodes` |
+| `hosts` | `remark` or `address` (`host_info`) | `remnawave_gathered.hosts` |
+| `users` | see below (`user_info`) | `remnawave_gathered.users`, plus `remnawave_gathered.users_page` |
+| `subscription_settings` | none | `remnawave_gathered.subscription_settings` |
+| `system` | `gather`, `timezone` (`system_info`) | `remnawave_gathered.system` |
+
+Users are the only entities the panel can filter and paginate server-side,
+through two endpoints with different query parameters. Which keys you use
+decides the endpoint, and the two groups cannot be mixed:
+
+| Keys | Endpoint |
+| --- | --- |
+| `username`, `id`, `short_uuid` | A single user. |
+| `status` (`active`, `disabled`, `limited`, `expired`), `traffic_limit_strategy`, `telegram_id`, `email`, `tag`, `external_squad` (name or UUID), `cursor` | `/api/users/stream`, cursor-paginated. |
+| `filters` (list of `{id, value}`), `filter_modes` (dict of field to mode), `global_filter_mode`, `sorting` (list of `{id, desc}`), `start` | `/api/users`, offset-paginated. The panel warns these filters are expensive. |
+
+Without `size`, `start` or `cursor` every page is fetched. With any of them
+one page is returned, and `remnawave_gathered.users_page` carries `total`
+(table endpoint) or `next_cursor` and `has_more` (stream endpoint).
+
+```yaml
+- name: Apply the users, then report who is over quota
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: kenyawest.remnawave.remnawave
+      vars:
+        remnawave_users: "{{ team }}"
+        remnawave_gather:
+          users:
+            status: limited
+          nodes:
+  post_tasks:
+    - name: Over-quota users
+      ansible.builtin.debug:
+        msg: "{{ remnawave_gathered.users | map(attribute='username') | list }}"
+```
 
 ## Usage
 
@@ -339,7 +401,7 @@ entity and leave the old one, so rename in the panel or delete explicitly.
         config_profile: default-profile
         inbounds: [vless-reality]
         country_code: NL
-        tags: [production, eu]
+        tags: [PRODUCTION, EU]
       - name: de-fra-1
         state: enabled
         address: 203.0.113.20
@@ -659,6 +721,12 @@ one and costs a single request:
 - **Lists are authoritative when set.** `inbounds`, `internal_squads`, `tags`
   and `nodes` replace whatever is there rather than merging. Setting one to an
   empty list clears it.
+- **Tags** can be set on config profiles, internal and external squads, nodes
+  and hosts - up to 10 per entity, each at most 36 characters of uppercase
+  letters, digits, `_` and `:` (for example `REGION:EU`). A tag outside that
+  format fails the task before anything is sent; tags are not uppercased for
+  you. Users are the exception: the panel gives them a single `tag` string
+  (up to 16 characters, no `:`), not a list.
 - **Clearing string fields** (`note`, `tag`, `email`, `description`,
   `server_description`) is done with an empty string, not with `null`.
 - **Traffic sizes** accept bytes as an integer or a human-readable string

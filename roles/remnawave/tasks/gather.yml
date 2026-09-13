@@ -1,0 +1,125 @@
+---
+# Reads the entity kinds named in remnawave_gather and publishes them as the
+# remnawave_gathered fact. Imported by main.yml inside its module_defaults
+# block, so it must not be used as a tasks_from entry point on its own.
+#
+# A kind is gathered when its key is present; its value holds the options of
+# the corresponding info module and may be empty or null.
+
+- name: Gather snippets
+  kenyawest.remnawave.snippet_info:
+    name: "{{ __remnawave_query.name | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.snippets or {} }}"
+  when: "'snippets' in remnawave_gather"
+  register: __remnawave_gathered_snippets
+
+- name: Gather config profiles
+  kenyawest.remnawave.config_profile_info:
+    name: "{{ __remnawave_query.name | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.config_profiles or {} }}"
+  when: "'config_profiles' in remnawave_gather"
+  register: __remnawave_gathered_config_profiles
+
+- name: Gather internal squads
+  kenyawest.remnawave.internal_squad_info:
+    name: "{{ __remnawave_query.name | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.internal_squads or {} }}"
+  when: "'internal_squads' in remnawave_gather"
+  register: __remnawave_gathered_internal_squads
+
+- name: Gather external squads
+  kenyawest.remnawave.external_squad_info:
+    name: "{{ __remnawave_query.name | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.external_squads or {} }}"
+  when: "'external_squads' in remnawave_gather"
+  register: __remnawave_gathered_external_squads
+
+- name: Gather nodes
+  kenyawest.remnawave.node_info:
+    name: "{{ __remnawave_query.name | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.nodes or {} }}"
+  when: "'nodes' in remnawave_gather"
+  register: __remnawave_gathered_nodes
+
+- name: Gather hosts
+  kenyawest.remnawave.host_info:
+    remark: "{{ __remnawave_query.remark | default(omit) }}"
+    address: "{{ __remnawave_query.address | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.hosts or {} }}"
+  when: "'hosts' in remnawave_gather"
+  register: __remnawave_gathered_hosts
+
+- name: Gather users
+  kenyawest.remnawave.user_info:
+    username: "{{ __remnawave_query.username | default(omit) }}"
+    id: "{{ __remnawave_query.id | default(omit) }}"
+    short_uuid: "{{ __remnawave_query.short_uuid | default(omit) }}"
+    status: "{{ __remnawave_query.status | default(omit) }}"
+    traffic_limit_strategy: "{{ __remnawave_query.traffic_limit_strategy | default(omit) }}"
+    telegram_id: "{{ __remnawave_query.telegram_id | default(omit) }}"
+    email: "{{ __remnawave_query.email | default(omit) }}"
+    tag: "{{ __remnawave_query.tag | default(omit) }}"
+    external_squad: "{{ __remnawave_query.external_squad | default(omit) }}"
+    cursor: "{{ __remnawave_query.cursor | default(omit) }}"
+    filters: "{{ __remnawave_query.filters | default(omit) }}"
+    filter_modes: "{{ __remnawave_query.filter_modes | default(omit) }}"
+    global_filter_mode: "{{ __remnawave_query.global_filter_mode | default(omit) }}"
+    sorting: "{{ __remnawave_query.sorting | default(omit) }}"
+    start: "{{ __remnawave_query.start | default(omit) }}"
+    size: "{{ __remnawave_query.size | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.users or {} }}"
+  when: "'users' in remnawave_gather"
+  register: __remnawave_gathered_users
+
+- name: Gather subscription settings
+  kenyawest.remnawave.api:
+    path: /api/subscription-settings
+  when: "'subscription_settings' in remnawave_gather"
+  register: __remnawave_gathered_subscription_settings
+
+- name: Gather system information
+  kenyawest.remnawave.system_info:
+    gather: "{{ __remnawave_query.gather | default(omit) }}"
+    timezone: "{{ __remnawave_query.timezone | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.system or {} }}"
+  when: "'system' in remnawave_gather"
+  register: __remnawave_gathered_system
+
+- name: Publish gathered entities
+  ansible.builtin.set_fact:
+    remnawave_gathered: >-
+      {{ {}
+         | combine({'snippets': __remnawave_gathered_snippets.snippets}
+                   if 'snippets' in remnawave_gather else {})
+         | combine({'config_profiles': __remnawave_gathered_config_profiles.profiles}
+                   if 'config_profiles' in remnawave_gather else {})
+         | combine({'internal_squads': __remnawave_gathered_internal_squads.squads}
+                   if 'internal_squads' in remnawave_gather else {})
+         | combine({'external_squads': __remnawave_gathered_external_squads.squads}
+                   if 'external_squads' in remnawave_gather else {})
+         | combine({'nodes': __remnawave_gathered_nodes.nodes}
+                   if 'nodes' in remnawave_gather else {})
+         | combine({'hosts': __remnawave_gathered_hosts.hosts}
+                   if 'hosts' in remnawave_gather else {})
+         | combine({'users': __remnawave_gathered_users.users,
+                    'users_page': __remnawave_gathered_users
+                                  | dict2items
+                                  | selectattr('key', 'in', ['total', 'next_cursor', 'has_more'])
+                                  | items2dict}
+                   if 'users' in remnawave_gather else {})
+         | combine({'subscription_settings': __remnawave_gathered_subscription_settings.response}
+                   if 'subscription_settings' in remnawave_gather else {})
+         | combine({'system': __remnawave_gathered_system
+                              | dict2items
+                              | selectattr('key', 'in', ['health', 'stats', 'bandwidth', 'nodes_statistics', 'metadata'])
+                              | items2dict}
+                   if 'system' in remnawave_gather else {}) }}
+  when: remnawave_gather | length > 0

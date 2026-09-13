@@ -26,6 +26,7 @@
         name: "{{ item.name }}"
         state: "{{ item.state | default('present') }}"
         config: "{{ item.config | default(omit) }}"
+        tags: "{{ item.tags | default(omit) }}"
       loop: "{{ remnawave_config_profiles }}"
       loop_control:
         label: "{{ item.name }}"
@@ -35,6 +36,7 @@
         name: "{{ item.name }}"
         state: "{{ item.state | default('present') }}"
         inbounds: "{{ item.inbounds | default(omit) }}"
+        tags: "{{ item.tags | default(omit) }}"
       loop: "{{ remnawave_internal_squads }}"
       loop_control:
         label: "{{ item.name }}"
@@ -43,6 +45,7 @@
       kenyawest.remnawave.external_squad:
         name: "{{ item.name }}"
         state: "{{ item.state | default('present') }}"
+        tags: "{{ item.tags | default(omit) }}"
       loop: "{{ remnawave_external_squads }}"
       loop_control:
         label: "{{ item.name }}"
@@ -119,3 +122,7 @@
         response_rules: "{{ remnawave_subscription_settings.response_rules | default(omit) }}"
         hwid_settings: "{{ remnawave_subscription_settings.hwid_settings | default(omit) }}"
       when: remnawave_subscription_settings | length > 0
+
+    # Reads come last, so they show the panel as this run left it.
+    - name: Read back entities
+      ansible.builtin.import_tasks: gather.yml

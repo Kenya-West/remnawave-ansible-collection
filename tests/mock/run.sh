@@ -21,6 +21,12 @@
 # Part 5 (snippets.yml) exercises snippets and the sync-to-config-profiles
 # action, also asserting inline.
 #
+# Part 6 (tags.yml) exercises tags on config profiles and squads, set through
+# their dedicated endpoints, and the tag validation.
+#
+# Part 7 (gather.yml) exercises reading entities: user_info's query
+# parameters on both listing endpoints, and the role's remnawave_gather.
+#
 # Requires the collection to be reachable via ANSIBLE_COLLECTIONS_PATH,
 # e.g.  tests/mock/run.sh  from a checkout symlinked as
 # <path>/ansible_collections/kenyawest/remnawave.
@@ -94,6 +100,22 @@ if out="$(run "$HERE/snippets.yml")"; then
     echo "PASS: snippets and snippet syncing"
 else
     echo "FAIL: snippets and snippet syncing"
+    echo "$out" | tail -60
+    exit 1
+fi
+
+if out="$(run "$HERE/tags.yml")"; then
+    echo "PASS: entity tags"
+else
+    echo "FAIL: entity tags"
+    echo "$out" | tail -60
+    exit 1
+fi
+
+if out="$(run "$HERE/gather.yml")"; then
+    echo "PASS: reading entities"
+else
+    echo "FAIL: reading entities"
     echo "$out" | tail -60
     exit 1
 fi

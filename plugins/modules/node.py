@@ -116,7 +116,10 @@ options:
     type: float
   tags:
     description:
-      - Tags of the node. Authoritative when set.
+      - Tags of the node. Authoritative when set; an empty list removes
+        every tag.
+      - At most 10 tags, each up to 36 characters of uppercase letters,
+        digits, underscores and colons.
     type: list
     elements: str
   note:
@@ -190,6 +193,7 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import 
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
     STATE_CHOICES, FieldSpec, build_patch, desired_enabled, exit_with_change,
     parse_traffic_limit, remnawave_argument_spec, resolve_for_check_mode,
+    validate_tags,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
     bulk_host_action, find_node, hosts_linked_to_node, resolve_inbound_uuids,
@@ -217,7 +221,7 @@ def build_fields(module, client):
         FieldSpec('traffic_reset_day', 'trafficResetDay'),
         FieldSpec('country_code', 'countryCode', to_api=lambda v: v.upper()),
         FieldSpec('consumption_multiplier', 'consumptionMultiplier'),
-        FieldSpec('tags', 'tags', kind='set'),
+        FieldSpec('tags', 'tags', kind='set', to_api=validate_tags),
         FieldSpec('note', 'note', to_api=lambda v: v or None),
     ]
     resolved = dict(params)

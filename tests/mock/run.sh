@@ -27,6 +27,9 @@
 # Part 7 (gather.yml) exercises reading entities: user_info's query
 # parameters on both listing endpoints, and the role's remnawave_gather.
 #
+# Part 8 (batch.yml) exercises managing many hosts in one task, including
+# how few requests it makes and that a bad entry changes nothing.
+#
 # Requires the collection to be reachable via ANSIBLE_COLLECTIONS_PATH,
 # e.g.  tests/mock/run.sh  from a checkout symlinked as
 # <path>/ansible_collections/kenyawest/remnawave.
@@ -116,6 +119,14 @@ if out="$(run "$HERE/gather.yml")"; then
     echo "PASS: reading entities"
 else
     echo "FAIL: reading entities"
+    echo "$out" | tail -60
+    exit 1
+fi
+
+if out="$(run "$HERE/batch.yml")"; then
+    echo "PASS: hosts managed in one task"
+else
+    echo "FAIL: hosts managed in one task"
     echo "$out" | tail -60
     exit 1
 fi

@@ -53,7 +53,7 @@ only the Python standard library.
 | --- | --- |
 | `user`, `user_info` | Panel users: expiration, traffic limits, squad membership, enable/disable; server-side filtering, sorting and pagination when reading |
 | `node`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, cascade onto linked hosts |
-| `host`, `host_info` | Subscription hosts: address, SNI, transport parameters, VLESS route id, node binding, subscription and squad visibility. Addressable by remark or by domain (`identify_by`) |
+| `host`, `hosts`, `host_info` | Subscription hosts: address, SNI, transport parameters, VLESS route id, node binding, subscription and squad visibility. Addressable by remark or by domain (`identify_by`). `hosts` manages a whole list in one task |
 | `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative) |
 | `snippet`, `snippet_info` | Reusable configuration fragments, with syncing into the profiles that embed them |
 | `internal_squad`, `internal_squad_info` | Internal squads and their inbounds |
@@ -384,6 +384,41 @@ nothing left to push.
 The role applies `remnawave_snippets` before `remnawave_config_profiles`,
 so a profile referencing a snippet finds it already in place.
 
+## Speed
+
+A task is a module run of its own, and the run is most of what a task
+costs - not the requests to the panel. Two things follow.
+
+**Run the modules on the controller.** They only speak HTTP to the panel,
+so nothing needs to happen on the inventory host a play targets. A task
+executed there goes over SSH every time (copying the module, starting a
+Python there, cleaning up), which easily takes seconds per task. Target
+`localhost`, or keep the inventory host for its variables and add
+`delegate_to: localhost` to the Remnawave tasks. When a task has to run
+remotely, enable SSH pipelining (`pipelining = True` under
+`[ssh_connection]`) to cut the round trips.
+
+**Manage many hosts with one task.** A `loop` over `host` is one module run
+per host, each reading the panel's hosts, nodes, config profiles and squads
+again. `hosts` takes the whole list, reads each listing once, and sends one
+request per host that needs a change:
+
+```yaml
+- kenyawest.remnawave.hosts:
+    hosts: "{{ generated_hosts }}"   # each item takes the options of `host`
+  register: published
+
+- ansible.builtin.debug:
+    msg: "{{ published.results | selectattr('changed') | length }} hosts changed"
+```
+
+Every entry is planned before anything is written, so an entry that cannot
+be applied - an ambiguous remark, an unknown node, a host declared twice -
+fails the task with nothing changed. The role's host stage uses it.
+
+Within any module run, listings looked up to resolve names are fetched once
+and reused until the module writes something.
+
 ## Semantics worth knowing
 
 - **Traffic limits** accept integers (bytes) or human-readable sizes
@@ -422,9 +457,12 @@ management use case, not because an endpoint exists.
 
 The repository contains:
 
-- `tests/unit/` - unit tests for the comparison/normalization helpers
-  (`python3 -m unittest tests.unit.plugins.module_utils.test_common` with the
-  collection tree on `PYTHONPATH`, or `ansible-test units`);
+- `tests/unit/` - unit tests for the comparison/normalization helpers, the
+  client's listing cache and host planning (`python3 -m unittest
+  tests.unit.plugins.module_utils.test_common
+  tests.unit.plugins.module_utils.test_client
+  tests.unit.plugins.module_utils.test_host` with the collection tree on
+  `PYTHONPATH`, or `ansible-test units`);
 - `tests/mock/` - an in-memory mock of the Remnawave API and an end-to-end
   suite (`tests/mock/run.sh`) asserting check-mode behaviour, first-run
   changes, second-run idempotency, minimal-delta updates, and the whole

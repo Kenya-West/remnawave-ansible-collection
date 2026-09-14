@@ -4,6 +4,31 @@ kenyawest.remnawave Release Notes
 
 .. contents:: Topics
 
+v1.2.1
+======
+
+Release Summary
+---------------
+
+Speeds up managing many hosts, which took seconds per host as a loop of the ``host`` module.
+
+Minor Changes
+-------------
+
+- all modules - fetch the listings used to resolve names (config profiles, squads, nodes, hosts, snippets) at most once per module run, until the module writes something.
+- host - share its planning and applying code with the new ``hosts`` module; behaviour is unchanged.
+- remnawave role - apply ``remnawave_hosts`` in one ``kenyawest.remnawave.hosts`` task instead of a loop of ``kenyawest.remnawave.host``, so the stage reads the panel once however many hosts it declares. A host may now appear only once in the list.
+
+Bugfixes
+--------
+
+- remnawave role - pass ``vless_route_id``, ``override_sni_from_address``, ``keep_sni_blank``, ``exclude_from_subscription_types`` and ``internal_squads`` of ``remnawave_hosts`` entries through to the panel; the host stage used to drop them silently.
+
+New Modules
+-----------
+
+- kenyawest.remnawave.hosts - Manage many Remnawave subscription hosts in one task
+
 v1.2.0
 ======
 

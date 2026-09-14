@@ -23,6 +23,9 @@ description:
   - Advanced host properties not covered by this module (mux, sockopt,
     mappers, subscription mappers and so on) can be managed with
     M(kenyawest.remnawave.api).
+  - To manage many hosts, prefer M(kenyawest.remnawave.hosts) over a loop
+    of this module. It reads the panel once for all of them, where every
+    loop iteration is a module run of its own.
 author: Kenya-West (@Kenya-West)
 extends_documentation_fragment:
   - kenyawest.remnawave.remnawave
@@ -188,6 +191,7 @@ options:
         elements: str
         required: true
 seealso:
+  - module: kenyawest.remnawave.hosts
   - module: kenyawest.remnawave.host_info
   - module: kenyawest.remnawave.node
   - module: kenyawest.remnawave.config_profile
@@ -281,212 +285,26 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import 
     RemnawaveApiError, RemnawaveClient,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
-    STATE_CHOICES, FieldSpec, build_patch, desired_enabled, exit_with_change,
-    remnawave_argument_spec, resolve_for_check_mode, validate_tags,
+    remnawave_argument_spec,
 )
-from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
-    find_host, resolve_inbound_uuids, resolve_internal_squad_uuids,
-    resolve_node_uuids,
+from ansible_collections.kenyawest.remnawave.plugins.module_utils.host import (
+    HOST_REQUIRED_IF, apply_host_plan, host_options, plan_host,
 )
-
-
-def to_route_id(value):
-    """Normalize the vless_route_id option into an int or None.
-
-    Empty string clears the field, matching how the other nullable host
-    options are cleared.
-    """
-    if value is None or value == '':
-        return None
-    if isinstance(value, bool):
-        raise ValueError('vless_route_id must be an integer between 0 and '
-                         '65535, or an empty string to clear it')
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        raise ValueError('vless_route_id must be an integer between 0 and '
-                         '65535, or an empty string to clear it, got %r'
-                         % (value,))
-    if not 0 <= number <= 65535:
-        raise ValueError('vless_route_id must be between 0 and 65535, got %d'
-                         % number)
-    return number
-
-
-def build_fields(module, client):
-    params = module.params
-    fields = [
-        FieldSpec('address', 'address'),
-        FieldSpec('port', 'port'),
-        FieldSpec('path', 'path', to_api=lambda v: v or None),
-        FieldSpec('sni', 'sni', to_api=lambda v: v or None),
-        FieldSpec('host_header', 'host', to_api=lambda v: v or None),
-        FieldSpec('alpn', 'alpn'),
-        FieldSpec('fingerprint', 'fingerprint', to_api=lambda v: v or None),
-        FieldSpec('security_layer', 'securityLayer', to_api=lambda v: v.upper()),
-        FieldSpec('hidden', 'isHidden'),
-        FieldSpec('tags', 'tags', kind='set', to_api=validate_tags),
-        FieldSpec('server_description', 'serverDescription',
-                  to_api=lambda v: v or None),
-        FieldSpec('vless_route_id', 'vlessRouteId', to_api=to_route_id),
-        FieldSpec('override_sni_from_address', 'overrideSniFromAddress'),
-        FieldSpec('keep_sni_blank', 'keepSniBlank'),
-        FieldSpec('exclude_from_subscription_types',
-                  'excludeFromSubscriptionTypes', kind='set'),
-    ]
-    resolved = dict(params)
-
-    if params['identify_by'] != 'remark' and params['remark'] is not None:
-        # Not the identifier here, so it is an ordinary field and may be
-        # used to rename the host.
-        fields.append(FieldSpec('remark', 'remark'))
-
-    wanted_enabled = desired_enabled(params['state'])
-    if wanted_enabled is not None:
-        # state enabled/disabled is just the isDisabled field for a host.
-        resolved['is_disabled'] = not wanted_enabled
-        fields.append(FieldSpec('is_disabled', 'isDisabled'))
-
-    if params['nodes'] is not None:
-        resolved['nodes'] = resolve_for_check_mode(
-            module,
-            lambda: resolve_node_uuids(client, params['nodes']),
-            list(params['nodes']))
-        fields.append(FieldSpec('nodes', 'nodes', kind='set'))
-
-    if params['internal_squads'] is not None:
-        squads = params['internal_squads']
-        resolved['internal_squads'] = {
-            'mode': squads['mode'].upper(),
-            'squads': sorted(resolve_for_check_mode(
-                module,
-                lambda: resolve_internal_squad_uuids(client, squads['squads']),
-                list(squads['squads']))),
-        }
-        fields.append(FieldSpec(
-            'internal_squads', 'internalSquads', kind='json',
-            from_api=lambda v: {
-                'mode': (v or {}).get('mode'),
-                'squads': sorted((v or {}).get('squads') or []),
-            }))
-
-    if params['config_profile'] is not None or params['inbound'] is not None:
-        if params['config_profile'] is None or params['inbound'] is None:
-            module.fail_json(
-                msg='config_profile and inbound must be set together')
-        profile_uuid, inbound_uuids = resolve_for_check_mode(
-            module,
-            lambda: resolve_inbound_uuids(
-                client, params['config_profile'], [params['inbound']]),
-            (params['config_profile'], [params['inbound']]))
-        resolved['config_profile'] = {
-            'configProfileUuid': profile_uuid,
-            'configProfileInboundUuid': inbound_uuids[0],
-        }
-        fields.append(FieldSpec(
-            'config_profile', 'inbound', kind='json',
-            from_api=lambda v: {
-                'configProfileUuid': (v or {}).get('configProfileUuid'),
-                'configProfileInboundUuid': (v or {}).get('configProfileInboundUuid'),
-            }))
-    return fields, resolved
-
-
-def run(module, client):
-    params = module.params
-    identify_by = params['identify_by']
-    identifier = params[identify_by]
-    if identifier is None:
-        module.fail_json(
-            msg='Option %s is required, because identify_by=%s makes it the '
-                'identifier of the host' % (identify_by, identify_by))
-    current = find_host(client, identifier, key=identify_by)
-
-    if params['state'] == 'absent':
-        if current is None:
-            module.exit_json(changed=False)
-        if not module.check_mode:
-            client.delete('/api/hosts/%s' % current['uuid'])
-        exit_with_change(module, {identify_by: identifier}, {})
-
-    fields, resolved = build_fields(module, client)
-    patch, before, after = build_patch(resolved, current, fields)
-
-    if current is None:
-        missing = [opt for opt in ('config_profile', 'inbound', 'address', 'port')
-                   if params[opt] is None]
-        if missing:
-            module.fail_json(
-                msg='Creating host %r requires: %s'
-                    % (identifier, ', '.join(missing)))
-        payload = dict(patch)
-        # The API always wants a remark; when hosts are addressed by domain
-        # and no remark is given, the domain is the obvious display name.
-        payload['remark'] = params['remark'] or params['address']
-        if module.check_mode:
-            exit_with_change(module, {},
-                             dict(after, remark=payload['remark']), host=payload)
-        created = client.post('/api/hosts', payload)
-        exit_with_change(module, {},
-                         dict(after, remark=payload['remark']), host=created)
-
-    if not patch:
-        module.exit_json(changed=False, host=current)
-
-    payload = dict(patch)
-    payload['uuid'] = current['uuid']
-    if module.check_mode:
-        exit_with_change(module, before, after, host=current)
-    updated = client.patch('/api/hosts', payload)
-    exit_with_change(module, before, after, host=updated)
 
 
 def main():
     argument_spec = remnawave_argument_spec()
-    argument_spec.update(
-        identify_by=dict(type='str', choices=['remark', 'address'],
-                         default='remark'),
-        remark=dict(type='str'),
-        state=dict(type='str', choices=STATE_CHOICES, default='present'),
-        nodes=dict(type='list', elements='str'),
-        config_profile=dict(type='str'),
-        inbound=dict(type='str'),
-        address=dict(type='str'),
-        port=dict(type='int'),
-        path=dict(type='str'),
-        sni=dict(type='str'),
-        host_header=dict(type='str'),
-        alpn=dict(type='str',
-                  choices=['h3', 'h2', 'http/1.1', 'h2,http/1.1',
-                           'h3,h2,http/1.1', 'h3,h2']),
-        fingerprint=dict(type='str'),
-        security_layer=dict(type='str', choices=['default', 'tls', 'none']),
-        hidden=dict(type='bool'),
-        tags=dict(type='list', elements='str'),
-        server_description=dict(type='str'),
-        vless_route_id=dict(type='raw'),
-        override_sni_from_address=dict(type='bool'),
-        keep_sni_blank=dict(type='bool'),
-        exclude_from_subscription_types=dict(
-            type='list', elements='str',
-            choices=['XRAY_JSON', 'XRAY_BASE64', 'MIHOMO', 'STASH', 'CLASH',
-                     'SINGBOX']),
-        internal_squads=dict(type='dict', options=dict(
-            mode=dict(type='str', choices=['exclude', 'allow_only'],
-                      required=True),
-            squads=dict(type='list', elements='str', required=True),
-        )),
-    )
+    argument_spec.update(host_options())
     module = AnsibleModule(
         argument_spec=argument_spec,
         supports_check_mode=True,
-        required_if=[('identify_by', 'remark', ['remark']),
-                     ('identify_by', 'address', ['address'])],
+        required_if=HOST_REQUIRED_IF,
     )
 
     client = RemnawaveClient(module)
     try:
-        run(module, client)
+        plan = plan_host(module, client, module.params)
+        module.exit_json(**apply_host_plan(module, client, plan))
     except RemnawaveApiError as exc:
         module.fail_json(msg=str(exc), status=exc.status, error_code=exc.error_code)
     except ValueError as exc:

@@ -1,0 +1,292 @@
+---
+# Exercises managing many hosts in one task with kenyawest.remnawave.hosts.
+#
+# Covers: check mode predicting a batch without applying it, creation, the
+# number of requests a batch makes (each listing read once, one write per
+# changed host), idempotency, a mix of updates, deletions and no-ops in one
+# task, and that a bad entry - a host declared twice, a creation missing
+# its inbound, an unknown node - fails the task without changing anything.
+- name: Hosts managed in one task
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "{{ panel }}"
+      token: test-token
+      api_key: sekret
+  vars:
+    panel: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+    fleet:
+      - remark: batch-ams
+        state: enabled
+        address: ams.batch.example.com
+        config_profile: batch-profile
+        inbound: batch-inbound
+        port: 443
+        nodes: [batch-node]
+      - remark: batch-fra
+        state: disabled
+        address: fra.batch.example.com
+        config_profile: batch-profile
+        inbound: batch-inbound
+        port: 443
+        nodes: [batch-node]
+      - remark: batch-waw
+        address: waw.batch.example.com
+        config_profile: batch-profile
+        inbound: batch-inbound
+        port: 443
+        vless_route_id: 400
+        override_sni_from_address: true
+        internal_squads:
+          mode: exclude
+          squads: [batch-squad]
+      - identify_by: address
+        address: par.batch.example.com
+        config_profile: batch-profile
+        inbound: batch-inbound
+        port: 443
+    # Request deltas between two readings of /api/_test/requests.
+    delta: >-
+      {{ (counts_after.json[request] | default(0))
+         - (counts_before.json[request] | default(0)) }}
+  tasks:
+    - name: Set up config profile
+      kenyawest.remnawave.config_profile:
+        name: batch-profile
+        config:
+          inbounds:
+            - tag: batch-inbound
+              protocol: vless
+              port: 443
+
+    - name: Set up node
+      kenyawest.remnawave.node:
+        name: batch-node
+        address: 203.0.113.40
+        config_profile: batch-profile
+        inbounds: [batch-inbound]
+
+    - name: Set up squad
+      kenyawest.remnawave.internal_squad:
+        name: batch-squad
+        inbounds:
+          - profile: batch-profile
+            tag: batch-inbound
+
+    # --- check mode ----------------------------------------------------------
+
+    - name: Predict the batch in check mode
+      kenyawest.remnawave.hosts:
+        hosts: "{{ fleet }}"
+      check_mode: true
+      diff: true
+      register: dry
+
+    - name: Read hosts after the dry run
+      kenyawest.remnawave.host_info:
+      register: after_dry
+
+    - name: Check mode predicted four creations and applied none
+      ansible.builtin.assert:
+        that:
+          - dry is changed
+          - dry.results | map(attribute='action') | list == ['create'] * 4
+          - dry.diff | length == 4
+          - dry.diff[0].before_header == "hosts[0] (remark 'batch-ams')"
+          - after_dry.hosts | selectattr('address', 'search', 'batch.example.com') | list == []
+        fail_msg: "unexpected dry run: {{ dry }}"
+
+    # --- creation, and how many requests it takes ----------------------------
+
+    - name: Requests before the batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: &test_headers
+          Authorization: Bearer test-token
+          X-Api-Key: sekret
+      register: counts_before
+
+    - name: Create the batch
+      kenyawest.remnawave.hosts:
+        hosts: "{{ fleet }}"
+      register: created
+
+    - name: Requests after the batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: Every host was created as declared
+      ansible.builtin.assert:
+        that:
+          - created is changed
+          - created.results | map(attribute='action') | list == ['create'] * 4
+          - created.results | map(attribute='changed') | list == [true] * 4
+          - created.results[1].host.isDisabled
+          - created.results[2].host.vlessRouteId == 400
+          - created.results[2].host.internalSquads.mode == 'EXCLUDE'
+          - created.results[3].host.remark == 'par.batch.example.com'
+          - created.results[3].identify_by == 'address'
+          - created.results[3].identifier == 'par.batch.example.com'
+        fail_msg: "unexpected creation: {{ created.results }}"
+
+    - name: Each listing was read once, and each host written once
+      ansible.builtin.assert:
+        that:
+          - delta | int == expected
+        fail_msg: "{{ request }}: expected {{ expected }} requests, got {{ delta }}"
+      loop:
+        - [GET /api/hosts, 1]
+        - [GET /api/nodes, 1]
+        - [GET /api/config-profiles, 1]
+        - [GET /api/internal-squads, 1]
+        - [POST /api/hosts, 4]
+      vars:
+        request: "{{ item[0] }}"
+        expected: "{{ item[1] }}"
+
+    # --- idempotency -----------------------------------------------------------
+
+    - name: Requests before the converged run
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_before
+
+    - name: Apply the same batch again
+      kenyawest.remnawave.hosts:
+        hosts: "{{ fleet }}"
+      register: again
+
+    - name: Requests after the converged run
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: The converged batch is a no-op that writes nothing
+      ansible.builtin.assert:
+        that:
+          - again is not changed
+          - again.results | map(attribute='action') | list == ['none'] * 4
+          - (counts_after.json['POST /api/hosts'] | default(0))
+            == (counts_before.json['POST /api/hosts'] | default(0))
+          - (counts_after.json['PATCH /api/hosts'] | default(0))
+            == (counts_before.json['PATCH /api/hosts'] | default(0))
+        fail_msg: "converged batch changed something: {{ again.results }}"
+
+    # --- a mix of changes in one task --------------------------------------------
+
+    - name: Update, enable, delete and leave alone in one task
+      kenyawest.remnawave.hosts:
+        hosts: &mixed
+          - remark: batch-ams
+            port: 8443
+          - remark: batch-fra
+            state: enabled
+          - remark: batch-waw
+          - identify_by: address
+            address: par.batch.example.com
+            state: absent
+          - remark: batch-nowhere
+            state: absent
+      register: mixed
+
+    - name: Read hosts after the mixed batch
+      kenyawest.remnawave.host_info:
+      register: after_mixed
+
+    - name: Each entry got exactly its own change
+      ansible.builtin.assert:
+        that:
+          - mixed is changed
+          - mixed.results | map(attribute='action') | list
+            == ['update', 'update', 'none', 'delete', 'none']
+          - mixed.results | map(attribute='changed') | list
+            == [true, true, false, true, false]
+          - (after_mixed.hosts | selectattr('remark', 'eq', 'batch-ams') | first).port == 8443
+          - not (after_mixed.hosts | selectattr('remark', 'eq', 'batch-fra') | first).isDisabled
+          - after_mixed.hosts | selectattr('address', 'eq', 'par.batch.example.com') | list == []
+        fail_msg: "unexpected mixed batch: {{ mixed.results }}"
+
+    - name: Apply the mixed batch again
+      kenyawest.remnawave.hosts:
+        hosts: *mixed
+      register: mixed_again
+
+    - name: The mixed batch is idempotent
+      ansible.builtin.assert:
+        that:
+          - mixed_again is not changed
+
+    - name: An empty batch manages nothing
+      kenyawest.remnawave.hosts:
+        hosts: []
+      register: empty
+
+    - name: The empty batch reports no results
+      ansible.builtin.assert:
+        that:
+          - empty is not changed
+          - empty.results == []
+
+    # --- bad entries change nothing ----------------------------------------------
+
+    - name: Declare one host twice, by remark and by address
+      kenyawest.remnawave.hosts:
+        hosts:
+          - remark: batch-ams
+            port: 9443
+          - identify_by: address
+            address: ams.batch.example.com
+            state: disabled
+      register: twice
+      ignore_errors: true
+
+    - name: Follow a good entry with one that cannot be created
+      kenyawest.remnawave.hosts:
+        hosts:
+          - remark: batch-ams
+            port: 9443
+          - remark: batch-new
+            port: 443
+      register: incomplete
+      ignore_errors: true
+
+    - name: Bind a host to a node that does not exist
+      kenyawest.remnawave.hosts:
+        hosts:
+          - remark: batch-waw
+            port: 9443
+          - remark: batch-ams
+            nodes: [no-such-node]
+      register: unknown_node
+      ignore_errors: true
+
+    - name: Read hosts after the refused batches
+      kenyawest.remnawave.host_info:
+      register: after_refused
+
+    - name: Every bad batch failed over its entry and changed nothing
+      ansible.builtin.assert:
+        that:
+          - twice is failed
+          - "'declare each host once' in twice.msg"
+          - "'Nothing was changed' in twice.msg"
+          - incomplete is failed
+          - "\"hosts[1] (remark 'batch-new')\" in incomplete.msg"
+          - "'requires: config_profile, inbound, address' in incomplete.msg"
+          - unknown_node is failed
+          - "\"hosts[1] (remark 'batch-ams')\" in unknown_node.msg"
+          - "'no-such-node' in unknown_node.msg"
+          - (after_refused.hosts | selectattr('remark', 'eq', 'batch-ams') | first).port == 8443
+          - not (after_refused.hosts | selectattr('remark', 'eq', 'batch-ams') | first).isDisabled
+          - (after_refused.hosts | selectattr('remark', 'eq', 'batch-waw') | first).port == 443
+          - after_refused.hosts | selectattr('remark', 'eq', 'batch-new') | list == []
+        fail_msg: >-
+          twice: {{ twice.msg | default('') }};
+          incomplete: {{ incomplete.msg | default('') }};
+          unknown_node: {{ unknown_node.msg | default('') }}

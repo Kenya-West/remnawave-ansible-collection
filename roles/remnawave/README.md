@@ -63,7 +63,12 @@ keep its entry and set `state: absent`.
 
 The role delegates nothing to the target host: the modules speak HTTP to the
 panel URL, so the play normally runs on `localhost` (or on any host with
-network access to the panel).
+network access to the panel). Prefer `localhost`: against a remote host every
+task goes over SSH, which costs seconds per task.
+
+Hosts are applied in a single `kenyawest.remnawave.hosts` task rather than a
+loop, so the stage reads the panel once however many hosts it declares, and a
+bad entry fails it before any host is written.
 
 ## Requirements
 
@@ -193,6 +198,16 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | `hidden` | bool | Hide the host from subscriptions. |
 | `tags` | list of str | Authoritative when set. |
 | `server_description` | str | Free-form description. |
+| `vless_route_id` | int | Route id the config profile's routing rules match on, 0-65535; an empty string clears it. |
+| `override_sni_from_address` | bool | Derive the SNI from `address` instead of using `sni`. |
+| `keep_sni_blank` | bool | Advertise an empty SNI. |
+| `exclude_from_subscription_types` | list of str | Subscription types the host is left out of. Authoritative when set. |
+| `internal_squads` | dict | `mode` (`exclude` or `allow_only`) and `squads` (names). The squad list is authoritative. |
+
+Each host may appear once in `remnawave_hosts`. All entries are planned against
+the panel as it was before the stage, so one entry cannot build on another's
+change - for example, renaming a host and addressing it by the new remark in
+the same run.
 
 **`remnawave_users`**
 

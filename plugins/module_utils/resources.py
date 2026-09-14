@@ -20,7 +20,7 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import 
 
 
 def list_config_profiles(client):
-    data = client.get('/api/config-profiles')
+    data = client.get('/api/config-profiles', cached=True)
     return (data or {}).get('configProfiles', [])
 
 
@@ -56,7 +56,7 @@ def resolve_inbound_uuids(client, profile, inbounds):
 
 
 def list_internal_squads(client):
-    data = client.get('/api/internal-squads')
+    data = client.get('/api/internal-squads', cached=True)
     return (data or {}).get('internalSquads', [])
 
 
@@ -88,7 +88,7 @@ def resolve_internal_squad_uuids(client, names_or_uuids):
 
 
 def list_external_squads(client):
-    data = client.get('/api/external-squads')
+    data = client.get('/api/external-squads', cached=True)
     return (data or {}).get('externalSquads', [])
 
 
@@ -119,7 +119,7 @@ def set_tags(client, collection, entity, tags):
 
 
 def list_nodes(client):
-    return client.get('/api/nodes') or []
+    return client.get('/api/nodes', cached=True) or []
 
 
 def find_node(client, name_or_uuid, required=False):
@@ -134,7 +134,7 @@ def find_node(client, name_or_uuid, required=False):
 
 
 def list_hosts(client):
-    return client.get('/api/hosts') or []
+    return client.get('/api/hosts', cached=True) or []
 
 
 def find_hosts_by(client, value, key='remark'):
@@ -203,7 +203,7 @@ def bulk_host_action(client, action, uuids):
 
 
 def list_snippets(client):
-    data = client.get('/api/snippets')
+    data = client.get('/api/snippets', cached=True)
     return (data or {}).get('snippets', [])
 
 

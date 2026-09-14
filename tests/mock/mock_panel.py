@@ -32,6 +32,9 @@ DB = {
     # Counts sync actions per snippet name, so the tests can assert when a
     # snippet was actually pushed to the config profiles using it.
     'snippet_syncs': {},
+    # Counts requests per "METHOD path", so the tests can assert how many
+    # times the modules read and wrote the panel.
+    'requests': {},
     'subscription_settings': {
         'uuid': str(uuidlib.uuid4()),
         'serveJsonAtBaseSubscription': True,
@@ -127,6 +130,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split('?')[0]
         method = self.command
+        if not path.startswith('/api/_test/'):
+            key = '%s %s' % (method, path)
+            DB['requests'][key] = DB['requests'].get(key, 0) + 1
         for pattern, handler in ROUTES:
             match = re.fullmatch(pattern, '%s %s' % (method, path))
             if match:
@@ -569,6 +575,11 @@ def snippet_sync_counts(handler):
     handler.reply(200, DB['snippet_syncs'], envelope=False)
 
 
+def request_counts(handler):
+    """Test-only endpoint: how often each "METHOD path" was requested."""
+    handler.reply(200, DB['requests'], envelope=False)
+
+
 def subscription_settings_get(handler):
     handler.reply(200, DB['subscription_settings'])
 
@@ -628,6 +639,7 @@ ROUTES = [
     (r'PATCH /api/snippets', snippet_update),
     (r'DELETE /api/snippets', snippet_delete),
     (r'GET /api/_test/snippet-syncs', snippet_sync_counts),
+    (r'GET /api/_test/requests', request_counts),
     (r'GET /api/subscription-settings', subscription_settings_get),
     (r'PATCH /api/subscription-settings', subscription_settings_update),
     (r'GET /api/system/health', health),

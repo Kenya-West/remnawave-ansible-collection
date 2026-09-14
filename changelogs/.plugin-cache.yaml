@@ -44,6 +44,11 @@ plugins:
       name: host_info
       namespace: ''
       version_added: null
+    hosts:
+      description: Manage many Remnawave subscription hosts in one task
+      name: hosts
+      namespace: ''
+      version_added: 1.2.1
     internal_squad:
       description: Manage Remnawave internal squads
       name: internal_squad
@@ -98,4 +103,4 @@ plugins:
   shell: {}
   strategy: {}
   vars: {}
-version: 1.2.0
+version: 1.2.1

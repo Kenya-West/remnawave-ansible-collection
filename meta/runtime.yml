@@ -9,6 +9,7 @@ action_groups:
     - external_squad
     - external_squad_info
     - host
+    - hosts
     - host_info
     - internal_squad
     - internal_squad_info

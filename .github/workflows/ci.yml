@@ -61,7 +61,11 @@ jobs:
         working-directory: ansible_collections/kenyawest/remnawave
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python3 -m unittest tests.unit.plugins.module_utils.test_common -v
+        run: >-
+          python3 -m unittest -v
+          tests.unit.plugins.module_utils.test_common
+          tests.unit.plugins.module_utils.test_client
+          tests.unit.plugins.module_utils.test_host
 
   mock-integration:
     name: Mock panel integration

@@ -71,28 +71,45 @@
       loop_control:
         label: "{{ item.name }}"
 
+    # One task for every host: a loop would be a module run per host, each
+    # reading the panel's hosts, nodes and profiles again. Keys the module
+    # does not know are dropped, as the loop used to ignore them.
     - name: Manage hosts
-      kenyawest.remnawave.host:
-        identify_by: "{{ item.identify_by | default('remark') }}"
-        remark: "{{ item.remark | default(omit) }}"
-        state: "{{ item.state | default('present') }}"
-        nodes: "{{ item.nodes | default(omit) }}"
-        config_profile: "{{ item.config_profile | default(omit) }}"
-        inbound: "{{ item.inbound | default(omit) }}"
-        address: "{{ item.address | default(omit) }}"
-        port: "{{ item.port | default(omit) }}"
-        path: "{{ item.path | default(omit) }}"
-        sni: "{{ item.sni | default(omit) }}"
-        host_header: "{{ item.host_header | default(omit) }}"
-        alpn: "{{ item.alpn | default(omit) }}"
-        fingerprint: "{{ item.fingerprint | default(omit) }}"
-        security_layer: "{{ item.security_layer | default(omit) }}"
-        hidden: "{{ item.hidden | default(omit) }}"
-        tags: "{{ item.tags | default(omit) }}"
-        server_description: "{{ item.server_description | default(omit) }}"
-      loop: "{{ remnawave_hosts }}"
-      loop_control:
-        label: "{{ item.remark | default(item.address) }}"
+      kenyawest.remnawave.hosts:
+        hosts: >-
+          {{
+            remnawave_hosts
+            | map('dict2items')
+            | map('selectattr', 'key', 'in', __remnawave_host_keys)
+            | map('list')
+            | map('items2dict')
+            | list
+          }}
+      vars:
+        __remnawave_host_keys:
+          - identify_by
+          - remark
+          - state
+          - nodes
+          - config_profile
+          - inbound
+          - address
+          - port
+          - path
+          - sni
+          - host_header
+          - alpn
+          - fingerprint
+          - security_layer
+          - hidden
+          - tags
+          - server_description
+          - vless_route_id
+          - override_sni_from_address
+          - keep_sni_blank
+          - exclude_from_subscription_types
+          - internal_squads
+      when: remnawave_hosts | length > 0
 
     - name: Manage users
       kenyawest.remnawave.user:

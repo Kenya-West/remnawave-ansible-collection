@@ -29,7 +29,7 @@ class FakeClient(object):
     def __init__(self, responses):
         self.responses = responses
 
-    def get(self, path, query=None, allow_404=False):
+    def get(self, path, query=None, allow_404=False, cached=False):
         return self.responses[path]
 
 

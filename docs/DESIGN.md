@@ -33,6 +33,8 @@ Consequences:
 - `module_utils/common.py` - the desired/current comparison engine
   (`FieldSpec`, `build_patch`), value normalization (sizes, timestamps,
   sets), the common argument spec, and check-mode helpers.
+- `module_utils/host.py` - the host options, and planning and applying one
+  host's change, shared by `host` and `hosts`.
 - `plugins/modules/*` - one file per resource; mostly declarative field
   tables plus the create/update/delete choreography.
 
@@ -102,6 +104,37 @@ Everything else stays out of the resource modules: this is a real
 configuration-management relationship (a host bound to a node cannot serve
 traffic once that node is gone), not a general "delete related objects"
 framework.
+
+## Batches
+
+A task is a module run, and a module run - more so over SSH - costs far
+more than the HTTP requests it makes. A loop of `host` over a generated list
+of dozens of hosts pays that cost once per host, and every iteration
+downloads the same host, node and profile listings to resolve the same
+names. `hosts` exists for that case only: it is `host` taking a list, not a
+different model. Its entries are the options of `host`, and both modules go
+through the same planning and applying code, so the two cannot drift apart.
+
+The rules a batch follows:
+
+- Plan everything, then write. An entry that cannot be applied fails the
+  whole task before the first request that changes anything, and the error
+  names the entry. A half-applied list is the outcome most worth avoiding.
+- Entries are planned against the panel as it was when the task started.
+  Each host may therefore be declared once; a second entry addressing the
+  same host, by whatever identifier, is refused rather than merged or
+  applied in order.
+- A write the panel rejects still stops the task at that entry. The entries
+  before it are applied and reported, since they cannot be rolled back.
+- Results are per entry and in order, with `changed` on each, so the
+  registered result reads like that of a loop.
+
+The client caches the listings used for lookups, by path, for the length of
+one module run and drops them on any write. That is what makes a batch read
+each listing once, and it spares single-entity modules repeated lookups too.
+
+A batch module is added for a resource when playbooks really declare that
+resource in bulk; hosts generated from an inventory are the first such case.
 
 ## Check mode
 

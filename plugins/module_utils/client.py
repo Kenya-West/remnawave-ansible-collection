@@ -48,6 +48,10 @@ class RemnawaveClient(object):
             self.headers['X-Api-Key'] = params['api_key']
         for key, value in (params.get('request_headers') or {}).items():
             self.headers[to_native(key)] = to_native(value)
+        # Listings read with cached=True, by path. One module run resolves
+        # many names against the same listings, and a batch plans many
+        # entities against them, so each is fetched once per run.
+        self._cache = {}
 
     def request(self, method, path, query=None, data=None, ok_statuses=None):
         """Perform a request and return ``(status, parsed_json_or_None)``.
@@ -55,6 +59,9 @@ class RemnawaveClient(object):
         ``ok_statuses`` is an optional iterable of extra HTTP statuses that
         must not raise (e.g. 404 when probing for existence).
         """
+        if method != 'GET':
+            # Any write may change what a cached listing holds.
+            self._cache.clear()
         if not path.startswith('/'):
             path = '/' + path
         url = self.base_url + path
@@ -113,12 +120,22 @@ class RemnawaveClient(object):
             return parsed['response']
         return parsed
 
-    def get(self, path, query=None, allow_404=False):
+    def get(self, path, query=None, allow_404=False, cached=False):
+        """GET ``path`` and unwrap the response.
+
+        ``cached`` reuses the response of an earlier cached GET of the same
+        path until the next write through this client. Callers must not
+        modify what it returns.
+        """
+        cacheable = cached and not query
+        if cacheable and path in self._cache:
+            return self._cache[path]
         ok = (404,) if allow_404 else ()
         status, parsed = self.request('GET', path, query=query, ok_statuses=ok)
-        if status == 404:
-            return None
-        return self._unwrap(parsed)
+        result = None if status == 404 else self._unwrap(parsed)
+        if cacheable:
+            self._cache[path] = result
+        return result
 
     def post(self, path, data=None, query=None):
         dummy, parsed = self.request('POST', path, query=query, data=data)

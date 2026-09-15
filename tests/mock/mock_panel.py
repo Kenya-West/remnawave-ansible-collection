@@ -57,21 +57,49 @@ def profile_inbounds(profile):
     return profile.get('inbounds', [])
 
 
-def make_profile(name, config):
+def make_profile(name, config, profile_uuid=None, previous=()):
+    """A profile with its inbounds parsed out of the config.
+
+    An inbound keeping its tag across a config update keeps its UUID, so
+    the nodes, hosts and squads referring to it stay valid.
+    """
+    profile_uuid = profile_uuid or new_uuid()
+    known = dict((i['tag'], i['uuid']) for i in previous)
     inbounds = []
     for inbound in (config or {}).get('inbounds', []):
         inbounds.append({
-            'uuid': new_uuid(),
+            'uuid': known.get(inbound.get('tag')) or new_uuid(),
+            'profileUuid': profile_uuid,
             'tag': inbound.get('tag'),
             'type': inbound.get('protocol'),
             'network': None, 'security': None,
             'port': inbound.get('port'), 'rawInbound': inbound,
         })
     return {
-        'uuid': new_uuid(), 'name': name, 'config': config,
+        'uuid': profile_uuid, 'name': name, 'config': config,
         'inbounds': inbounds, 'tags': [], 'viewPosition': 0,
         'nodes': [],
     }
+
+
+def profile_conflict(body, own_uuid=None):
+    """The panel's 409 reason for a profile write, or None.
+
+    Profile names and inbound tags are both unique across all profiles.
+    """
+    others = [p for p in DB['config_profiles'].values() if p['uuid'] != own_uuid]
+    if 'name' in body and any(p['name'] == body['name'] for p in others):
+        return 'Config profile name already exists'
+    tags = [i.get('tag') for i in (body.get('config') or {}).get('inbounds', [])]
+    taken = set(i['tag'] for p in others for i in p['inbounds'])
+    if len(set(tags)) != len(tags) or taken & set(tags):
+        return 'Inbound tags must be unique in global scope'
+    return None
+
+
+def conflict(handler, message):
+    handler.reply(409, {'message': message, 'errorCode': 'CONFLICT'},
+                  envelope=False)
 
 
 def user_view(user):
@@ -184,6 +212,10 @@ cp_list, _cp_create_generic, cp_update, cp_delete = collection_handlers(
 
 def cp_create(handler):
     body = handler.read_body()
+    reason = profile_conflict(body)
+    if reason:
+        conflict(handler, reason)
+        return
     item = make_profile(body['name'], body.get('config'))
     DB['config_profiles'][item['uuid']] = item
     handler.reply(201, item)
@@ -195,8 +227,24 @@ def cp_update_config(handler):
     if not item:
         handler.not_found()
         return
+    reason = profile_conflict(body, own_uuid=item['uuid'])
+    if reason:
+        conflict(handler, reason)
+        return
+    # The panel validates an updated config more strictly than a new one,
+    # and answers this particular refusal with a 500.
+    if 'config' in body and not (body['config'] or {}).get('outbounds'):
+        handler.reply(500, {'message': "Config doesn't have outbounds.",
+                            'errorCode': 'A061'}, envelope=False)
+        return
     if 'config' in body:
-        rebuilt = make_profile(item['name'], body['config'])
+        # Like the panel, store every inbound with a clients list of its own,
+        # so the modules must not count those as a difference.
+        for inbound in body['config'].get('inbounds', []):
+            inbound.setdefault('settings', {}).setdefault('clients', [])
+        rebuilt = make_profile(item['name'], body['config'],
+                               profile_uuid=item['uuid'],
+                               previous=item['inbounds'])
         item['config'] = body['config']
         item['inbounds'] = rebuilt['inbounds']
     if 'name' in body:

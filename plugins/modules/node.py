@@ -15,8 +15,9 @@ description:
     a declarative way.
   - Nodes are identified by their C(name). Only the options you set are
     managed - omitted options are left untouched on the panel.
-  - The config profile is referenced by name and inbounds by tag; both are
-    resolved to UUIDs automatically.
+  - Inbounds are referenced by tag and the config profile by name, and both
+    are resolved to UUIDs automatically. Inbound tags are unique across
+    profiles, so the config profile may be left out.
   - Hosts bound to the node can be disabled or deleted along with it through
     O(linked_hosts), which covers decommissioning a node without leaving
     dangling subscription entries behind.
@@ -78,12 +79,15 @@ options:
   config_profile:
     description:
       - Config profile to activate on the node, by name or UUID.
-      - Required when the node does not exist yet.
+      - Optional, since it is the profile holding O(inbounds). Set, every
+        inbound must belong to it. Requires O(inbounds).
     type: str
   inbounds:
     description:
-      - Inbounds of the config profile to activate on the node, by tag or
-        UUID. Authoritative when set.
+      - Inbounds to activate on the node, by tag or UUID. Authoritative when
+        set.
+      - They must all belong to one config profile, which is activated along
+        with them. Without O(config_profile) the list must not be empty.
       - Required when the node does not exist yet.
     type: list
     elements: str
@@ -226,9 +230,10 @@ def build_fields(module, client):
     ]
     resolved = dict(params)
     if params['config_profile'] is not None or params['inbounds'] is not None:
-        if params['config_profile'] is None or params['inbounds'] is None:
-            module.fail_json(
-                msg='config_profile and inbounds must be set together')
+        # The inbounds alone suffice: their tags are unique across profiles,
+        # so they name their profile too.
+        if params['inbounds'] is None:
+            module.fail_json(msg='config_profile requires inbounds')
         profile_uuid, inbound_uuids = resolve_for_check_mode(
             module,
             lambda: resolve_inbound_uuids(
@@ -312,7 +317,7 @@ def run(module, client):
     after.update(patch_after)
 
     if current is None:
-        missing = [opt for opt in ('address', 'config_profile', 'inbounds')
+        missing = [opt for opt in ('address', 'inbounds')
                    if params[opt] is None]
         if missing:
             module.fail_json(

@@ -17,6 +17,7 @@
 - name: Gather config profiles
   kenyawest.remnawave.config_profile_info:
     name: "{{ __remnawave_query.name | default(omit) }}"
+    inbound: "{{ __remnawave_query.inbound | default(omit) }}"
   vars:
     __remnawave_query: "{{ remnawave_gather.config_profiles or {} }}"
   when: "'config_profiles' in remnawave_gather"
@@ -99,7 +100,8 @@
       {{ {}
          | combine({'snippets': __remnawave_gathered_snippets.snippets}
                    if 'snippets' in remnawave_gather else {})
-         | combine({'config_profiles': __remnawave_gathered_config_profiles.profiles}
+         | combine({'config_profiles': __remnawave_gathered_config_profiles.profiles,
+                    'inbounds': __remnawave_gathered_config_profiles.inbounds}
                    if 'config_profiles' in remnawave_gather else {})
          | combine({'internal_squads': __remnawave_gathered_internal_squads.squads}
                    if 'internal_squads' in remnawave_gather else {})

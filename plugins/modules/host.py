@@ -18,8 +18,9 @@ description:
     display name, is what your data is keyed by.
   - Whichever identifier is used must match at most one host; the module
     fails rather than guessing when several hosts share it.
-  - The inbound is referenced by config profile name and inbound tag and
-    resolved to UUIDs automatically.
+  - The inbound is referenced by its tag and resolved to UUIDs
+    automatically, along with the config profile holding it. Inbound tags
+    are unique across profiles, so naming the profile is optional.
   - Advanced host properties not covered by this module (mux, sockopt,
     mappers, subscription mappers and so on) can be managed with
     M(kenyawest.remnawave.api).
@@ -82,11 +83,12 @@ options:
   config_profile:
     description:
       - Config profile the host's inbound belongs to, by name or UUID.
-      - Required when the host does not exist yet.
+      - Optional, since it is the profile holding O(inbound). Set, the
+        inbound must belong to it. Requires O(inbound).
     type: str
   inbound:
     description:
-      - Inbound of the config profile, by tag or UUID.
+      - Inbound the host serves, by tag or UUID.
       - Required when the host does not exist yet.
     type: str
   address:

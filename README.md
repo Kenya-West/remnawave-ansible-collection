@@ -16,9 +16,9 @@ the way Ansible modules are supposed to work:
   fields you set, and apply the minimal change. Running the same play twice
   yields `changed=0`.
 - Entities are addressed by stable human identifiers (username, node name,
-  host remark, profile name). Cross-references such as squads, config
-  profiles and inbounds are given by name or tag and resolved to UUIDs
-  internally. UUIDs never need to appear in playbooks.
+  host remark, profile name or inbound tag). Cross-references such as
+  squads, config profiles and inbounds are given by name or tag and resolved
+  to UUIDs internally. UUIDs never need to appear in playbooks.
 - One resource module may use several API endpoints internally (for example,
   enabling a node is an action endpoint, but you express it as `enabled:
   true`). Conversely, most endpoints are intentionally not exposed at all.
@@ -54,7 +54,7 @@ only the Python standard library.
 | `user`, `user_info` | Panel users: expiration, traffic limits, squad membership, enable/disable; server-side filtering, sorting and pagination when reading |
 | `node`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, cascade onto linked hosts |
 | `host`, `hosts`, `host_info` | Subscription hosts: address, SNI, transport parameters, VLESS route id, node binding, subscription and squad visibility. Addressable by remark or by domain (`identify_by`). `hosts` manages a whole list in one task |
-| `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative) |
+| `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative). Addressable by name or by the tag of one of their inbounds; `config_profile_info` turns an inbound tag into the inbound's and the profile's UUIDs |
 | `snippet`, `snippet_info` | Reusable configuration fragments, with syncing into the profiles that embed them |
 | `internal_squad`, `internal_squad_info` | Internal squads and their inbounds |
 | `external_squad`, `external_squad_info` | External squads |
@@ -151,6 +151,66 @@ which is the way to act on all of them:
     remark: "{{ item.remark }}"
     state: disabled
   loop: "{{ matched.results | map(attribute='hosts') | flatten }}"
+```
+
+### Addressing config profiles by inbound tag
+
+The panel keeps inbound tags unique across every config profile, and a tag
+is written in the Xray config itself, so it survives what a profile name
+does not - a rename in the panel UI, a profile rebuilt under another name.
+Wherever the collection deals with a config profile, an inbound tag is
+enough to find it.
+
+`config_profile` takes `inbound` as an alternative identifier. The profile
+holding that inbound is the one managed, and `name` becomes an ordinary
+field that renames it:
+
+```yaml
+# Tag and rename the profile serving vless-reality, whatever it is called now
+- kenyawest.remnawave.config_profile:
+    inbound: vless-reality
+    name: eu-profile
+    tags: [PRODUCTION]
+
+# Delete the profile holding a retired inbound
+- kenyawest.remnawave.config_profile:
+    inbound: legacy-trojan
+    state: absent
+```
+
+A profile can be created this way too, given `name` and `config`. When a
+`config` is supplied, it must still declare the identifying inbound -
+otherwise the next run would not find the profile again - so removing or
+renaming that inbound is done by addressing the profile by `name`.
+
+References to inbounds need no config profile either: `host` and `hosts`
+take just `inbound`, `node` just `inbounds` (all from one profile), and
+`internal_squad` accepts plain tags in `inbounds`. Naming the profile as
+well still works, and then the inbounds must belong to it.
+
+```yaml
+- kenyawest.remnawave.node:
+    name: nl-ams-1
+    address: 203.0.113.10
+    inbounds: [vless-reality]
+
+- kenyawest.remnawave.internal_squad:
+    name: default-squad
+    inbounds: [vless-reality, ss-inbound]
+```
+
+For the rare task that does need UUIDs - an `api` call, say -
+`config_profile_info` looks them up by tag. Its `inbounds` result lists the
+matching inbound with its own UUID and its profile's UUID and name; without
+a filter it lists every inbound of the panel that way.
+
+```yaml
+- kenyawest.remnawave.config_profile_info:
+    inbound: vless-reality
+  register: found
+
+- ansible.builtin.debug:
+    msg: "{{ found.inbounds[0].uuid }} in profile {{ found.inbounds[0].profileUuid }}"
 ```
 
 ### VLESS routing on hosts
@@ -458,10 +518,12 @@ management use case, not because an endpoint exists.
 The repository contains:
 
 - `tests/unit/` - unit tests for the comparison/normalization helpers, the
-  client's listing cache and host planning (`python3 -m unittest
+  client's listing cache, host planning and inbound resolution
+  (`python3 -m unittest
   tests.unit.plugins.module_utils.test_common
   tests.unit.plugins.module_utils.test_client
-  tests.unit.plugins.module_utils.test_host` with the collection tree on
+  tests.unit.plugins.module_utils.test_host
+  tests.unit.plugins.module_utils.test_resources` with the collection tree on
   `PYTHONPATH`, or `ansible-test units`);
 - `tests/mock/` - an in-memory mock of the Remnawave API and an end-to-end
   suite (`tests/mock/run.sh`) asserting check-mode behaviour, first-run

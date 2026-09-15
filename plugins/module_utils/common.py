@@ -162,6 +162,31 @@ def parse_json_option(value, option_name, module):
     module.fail_json(msg='Option %s must be a dict, a list or a JSON string' % option_name)
 
 
+def normalize_xray_config(config):
+    """A config profile's config as compared, without what the panel owns.
+
+    Storing an updated config, the panel gives every inbound a
+    ``settings.clients`` list, since it manages an inbound's clients itself.
+    A config that leaves them out would otherwise never match what was
+    stored, and every run would report a change. Only for comparison - the
+    config is still sent as given.
+    """
+    if not isinstance(config, dict) or not isinstance(config.get('inbounds'), list):
+        return config
+    inbounds = []
+    for inbound in config['inbounds']:
+        if isinstance(inbound, dict) and isinstance(inbound.get('settings'), dict):
+            inbound = dict(inbound)
+            settings = dict((k, v) for k, v in inbound.pop('settings').items()
+                            if k != 'clients')
+            if settings:
+                inbound['settings'] = settings
+        inbounds.append(inbound)
+    normalized = dict(config)
+    normalized['inbounds'] = inbounds
+    return normalized
+
+
 class FieldSpec(object):
     """Mapping between one module option and one API field.
 

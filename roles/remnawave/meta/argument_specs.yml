@@ -6,7 +6,8 @@ argument_specs:
       - Applies the desired state described by the C(remnawave_*) variables to a Remnawave panel, in dependency order (config profiles, squads, nodes, hosts,
         users, subscription settings).
       - Optionally reads entities back afterwards (C(remnawave_gather)) into the C(remnawave_gathered) fact.
-      - Every list item accepts the options of the corresponding module of this collection; only C(name)/C(username)/C(remark) is mandatory per item.
+      - Every list item accepts the options of the corresponding module of this collection; only the identifier (C(name), C(username), C(remark),
+        or C(inbound) for a config profile) is mandatory per item.
       - The whole role can be run with C(--check) (and C(--diff)).
     options:
       remnawave_panel_url:
@@ -90,7 +91,9 @@ argument_specs:
             description: Options of kenyawest.remnawave.snippet_info (C(name)).
           config_profiles:
             type: dict
-            description: Options of kenyawest.remnawave.config_profile_info (C(name)).
+            description:
+              - Options of kenyawest.remnawave.config_profile_info (C(name) or C(inbound)).
+              - Also publishes the inbounds of the gathered profiles as C(remnawave_gathered.inbounds).
           internal_squads:
             type: dict
             description: Options of kenyawest.remnawave.internal_squad_info (C(name)).

@@ -15,8 +15,8 @@ __metaclass__ = type
 import unittest
 
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
-    FieldSpec, build_patch, desired_enabled, is_uuid, parse_traffic_limit,
-    tags_differ, times_equal, validate_tags,
+    FieldSpec, build_patch, desired_enabled, is_uuid, normalize_xray_config,
+    parse_traffic_limit, tags_differ, times_equal, validate_tags,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
     hosts_linked_to_node,
@@ -121,6 +121,33 @@ class TestTagsDiffer(unittest.TestCase):
         self.assertFalse(tags_differ([], None))
         self.assertTrue(tags_differ(['A'], None))
         self.assertTrue(tags_differ([], ['A']))
+
+
+class TestNormalizeXrayConfig(unittest.TestCase):
+
+    def test_clients_the_panel_added_are_ignored(self):
+        desired = {'inbounds': [{'tag': 'vless', 'port': 443}],
+                   'outbounds': [{'tag': 'DIRECT'}]}
+        stored = {'inbounds': [{'tag': 'vless', 'port': 443,
+                                'settings': {'clients': []}}],
+                  'outbounds': [{'tag': 'DIRECT'}]}
+        self.assertEqual(normalize_xray_config(desired),
+                         normalize_xray_config(stored))
+
+    def test_other_settings_still_count(self):
+        desired = {'inbounds': [{'tag': 'vless', 'settings': {'decryption': 'none'}}]}
+        stored = {'inbounds': [{'tag': 'vless', 'settings': {'clients': []}}]}
+        self.assertNotEqual(normalize_xray_config(desired),
+                            normalize_xray_config(stored))
+
+    def test_input_is_not_modified(self):
+        stored = {'inbounds': [{'tag': 'vless', 'settings': {'clients': []}}]}
+        normalize_xray_config(stored)
+        self.assertEqual(stored['inbounds'][0]['settings'], {'clients': []})
+
+    def test_configs_without_inbounds_pass_through(self):
+        self.assertIsNone(normalize_xray_config(None))
+        self.assertEqual(normalize_xray_config({'log': {}}), {'log': {}})
 
 
 class TestDesiredEnabled(unittest.TestCase):

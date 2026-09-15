@@ -278,7 +278,7 @@
           - "'Nothing was changed' in twice.msg"
           - incomplete is failed
           - "\"hosts[1] (remark 'batch-new')\" in incomplete.msg"
-          - "'requires: config_profile, inbound, address' in incomplete.msg"
+          - "'requires: inbound, address' in incomplete.msg"
           - unknown_node is failed
           - "\"hosts[1] (remark 'batch-ams')\" in unknown_node.msg"
           - "'no-such-node' in unknown_node.msg"

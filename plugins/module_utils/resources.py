@@ -35,11 +35,60 @@ def find_config_profile(client, name_or_uuid, required=False):
     return matches[0]
 
 
+def find_inbounds(client, tag_or_uuid):
+    """Every (profile, inbound) pair whose inbound has this tag or UUID.
+
+    The panel keeps inbound tags unique across all config profiles, which
+    makes a tag the most stable handle on both an inbound and the profile
+    holding it: unlike the UUIDs, it is written in the config itself.
+    """
+    key = 'uuid' if is_uuid(tag_or_uuid) else 'tag'
+    return [(profile, inbound)
+            for profile in list_config_profiles(client)
+            for inbound in profile.get('inbounds') or []
+            if inbound.get(key) == tag_or_uuid]
+
+
+def find_inbound(client, tag_or_uuid, required=False):
+    """The single inbound with this tag or UUID, and its config profile.
+
+    Returns (profile, inbound), or (None, None) when nothing matches.
+    """
+    matches = find_inbounds(client, tag_or_uuid)
+    if len(matches) > 1:
+        raise RemnawaveApiError(
+            'Inbound %r is found in several config profiles (%s); refer to it '
+            'together with its config profile'
+            % (tag_or_uuid, ', '.join(sorted(repr(p.get('name')) for p, i in matches))))
+    if not matches:
+        if required:
+            raise RemnawaveApiError(
+                'No config profile has an inbound %r (available tags: %s)'
+                % (tag_or_uuid, ', '.join(sorted(
+                    i.get('tag') for p in list_config_profiles(client)
+                    for i in p.get('inbounds') or [] if i.get('tag')))))
+        return None, None
+    return matches[0]
+
+
+def inbound_view(profile, inbound):
+    """An inbound as the info module reports it: with its profile's identity."""
+    view = dict(inbound)
+    view['profileUuid'] = inbound.get('profileUuid') or profile.get('uuid')
+    view['profileName'] = profile.get('name')
+    return view
+
+
 def resolve_inbound_uuids(client, profile, inbounds):
     """Resolve a config profile plus a list of inbound tags/UUIDs.
 
+    ``profile`` may be None, in which case it is the profile holding the
+    inbounds; they must then all belong to that one profile.
+
     Returns (profile_uuid, [inbound_uuid, ...]).
     """
+    if profile is None:
+        return _resolve_inbounds_without_profile(client, inbounds)
     profile_obj = find_config_profile(client, profile, required=True)
     by_tag = dict((i.get('tag'), i.get('uuid')) for i in profile_obj.get('inbounds', []))
     uuids = []
@@ -53,6 +102,22 @@ def resolve_inbound_uuids(client, profile, inbounds):
                 'Inbound %r not found in config profile %r (available tags: %s)'
                 % (item, profile_obj.get('name'), ', '.join(sorted(k for k in by_tag if k))))
     return profile_obj['uuid'], uuids
+
+
+def _resolve_inbounds_without_profile(client, inbounds):
+    """Derive the config profile from the inbounds themselves."""
+    if not inbounds:
+        raise ValueError('The config profile cannot be derived from an empty '
+                         'list of inbounds; set the config profile as well')
+    pairs = [find_inbound(client, item, required=True) for item in inbounds]
+    profiles = dict((p['uuid'], p.get('name')) for p, i in pairs)
+    if len(profiles) > 1:
+        raise ValueError(
+            'Inbounds %s belong to different config profiles (%s), but must '
+            'all come from one'
+            % (', '.join(repr(item) for item in inbounds),
+               ', '.join(sorted(repr(n) for n in profiles.values()))))
+    return pairs[0][0]['uuid'], [i['uuid'] for p, i in pairs]
 
 
 def list_internal_squads(client):

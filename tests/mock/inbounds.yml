@@ -1,0 +1,407 @@
+---
+# Exercises addressing config profiles by the tag of one of their inbounds
+# instead of by name, looking up the UUIDs behind a tag, and referring to
+# inbounds by tag alone from nodes, hosts and internal squads.
+#
+# Covers: creating, retagging, renaming, updating and deleting a profile by
+# an inbound tag, idempotency and check mode of each, refusing a config that
+# drops the identifying inbound and names that collide, the info module's
+# lookups by tag and UUID, the config profile derived from inbound tags on
+# the other modules, and the role passing inbound through.
+- name: Config profiles addressed by inbound tag
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+      token: test-token
+      api_key: sekret
+  vars:
+    ib_config:
+      inbounds:
+        - tag: ib-vless
+          protocol: vless
+          port: 443
+        - tag: ib-trojan
+          protocol: trojan
+          port: "{{ ib_trojan_port | default(8443) }}"
+      # The panel refuses to update a config without outbounds.
+      outbounds:
+        - tag: DIRECT
+          protocol: freedom
+  tasks:
+    # --- the profile itself -------------------------------------------------
+
+    - name: Create a profile by its inbound tag
+      kenyawest.remnawave.config_profile:
+        inbound: ib-vless
+        name: ib-profile
+        config: "{{ ib_config }}"
+      register: created
+
+    - name: Declare it again by the tag
+      kenyawest.remnawave.config_profile:
+        inbound: ib-vless
+        name: ib-profile
+        config: "{{ ib_config }}"
+      register: created_again
+
+    - name: The profile is created once
+      ansible.builtin.assert:
+        that:
+          - created is changed
+          - created.profile.name == 'ib-profile'
+          - created_again is not changed
+
+    - name: Refuse to create a profile by a tag without a name
+      kenyawest.remnawave.config_profile:
+        inbound: ib-nowhere
+        config:
+          inbounds:
+            - tag: ib-nowhere
+              protocol: vless
+      register: nameless
+      ignore_errors: true
+
+    - name: Predict tagging the profile knowing only an inbound tag
+      kenyawest.remnawave.config_profile:
+        inbound: ib-trojan
+        tags: [BY_INBOUND]
+      check_mode: true
+      diff: true
+      register: tag_predicted
+
+    - name: Tag the profile knowing only an inbound tag
+      kenyawest.remnawave.config_profile:
+        inbound: ib-trojan
+        tags: [BY_INBOUND]
+      register: tagged
+
+    - name: Tag it again
+      kenyawest.remnawave.config_profile:
+        inbound: ib-vless
+        tags: [BY_INBOUND]
+      register: tagged_again
+
+    - name: Tags are applied through the inbound once, and predicted first
+      ansible.builtin.assert:
+        that:
+          - nameless is failed
+          - "'name is required' in nameless.msg"
+          - tag_predicted is changed
+          - tag_predicted.diff.after.tags == ['BY_INBOUND']
+          - tag_predicted.profile.tags == []
+          - tagged is changed
+          - tagged.profile.tags == ['BY_INBOUND']
+          - tagged_again is not changed
+
+    - name: Rename the profile found by its inbound
+      kenyawest.remnawave.config_profile:
+        inbound: ib-vless
+        name: ib-renamed
+      diff: true
+      register: renamed
+
+    - name: Rename it again
+      kenyawest.remnawave.config_profile:
+        inbound: ib-trojan
+        name: ib-renamed
+      register: renamed_again
+
+    - name: Read the old name back
+      kenyawest.remnawave.config_profile_info:
+        name: ib-profile
+      register: old_name
+
+    - name: The profile is renamed once, keeping its tags
+      ansible.builtin.assert:
+        that:
+          - renamed is changed
+          - renamed.diff.before.name == 'ib-profile'
+          - renamed.diff.after.name == 'ib-renamed'
+          - renamed.profile.name == 'ib-renamed'
+          - renamed_again is not changed
+          - old_name.profiles == []
+
+    - name: Change the config of the profile by an inbound tag
+      kenyawest.remnawave.config_profile:
+        inbound: ib-trojan
+        config: "{{ ib_config }}"
+      vars:
+        ib_trojan_port: 9443
+      register: reconfigured
+
+    - name: Change it again
+      kenyawest.remnawave.config_profile:
+        inbound: ib-trojan
+        config: "{{ ib_config }}"
+      vars:
+        ib_trojan_port: 9443
+      register: reconfigured_again
+
+    - name: Refuse a config without the identifying inbound
+      kenyawest.remnawave.config_profile:
+        inbound: ib-trojan
+        config:
+          inbounds:
+            - tag: ib-vless
+              protocol: vless
+              port: 443
+      register: dropped
+      ignore_errors: true
+
+    - name: The config changes once, and never loses its identifier
+      ansible.builtin.assert:
+        that:
+          - reconfigured is changed
+          - reconfigured.profile.config.inbounds[1].port == 9443
+          - reconfigured_again is not changed
+          - dropped is failed
+          - "'identifies this config profile' in dropped.msg"
+
+    # --- looking up UUIDs -------------------------------------------------
+
+    - name: Look up an inbound tag
+      kenyawest.remnawave.config_profile_info:
+        inbound: ib-trojan
+      register: by_tag
+
+    - name: Look up the same inbound by its UUID
+      kenyawest.remnawave.config_profile_info:
+        inbound: "{{ by_tag.inbounds[0].uuid }}"
+      register: by_uuid
+
+    - name: Look up a tag nothing has
+      kenyawest.remnawave.config_profile_info:
+        inbound: ib-nowhere
+      register: by_unknown_tag
+
+    - name: List every profile with its inbounds
+      kenyawest.remnawave.config_profile_info:
+      register: everything
+
+    - name: A tag leads to the UUIDs of the inbound and its profile
+      ansible.builtin.assert:
+        that:
+          - by_tag.profiles | length == 1
+          - by_tag.profiles[0].name == 'ib-renamed'
+          - by_tag.inbounds | length == 1
+          - by_tag.inbounds[0].tag == 'ib-trojan'
+          - by_tag.inbounds[0].uuid | length == 36
+          - by_tag.inbounds[0].profileUuid == by_tag.profiles[0].uuid
+          - by_tag.inbounds[0].profileName == 'ib-renamed'
+          - by_uuid.inbounds == by_tag.inbounds
+          - by_unknown_tag.profiles == []
+          - by_unknown_tag.inbounds == []
+          - >-
+            everything.inbounds | selectattr('profileName', 'eq', 'ib-renamed')
+            | map(attribute='tag') | sort == ['ib-trojan', 'ib-vless']
+        fail_msg: "unexpected lookup: {{ by_tag }}"
+
+    - name: Remember the UUIDs
+      ansible.builtin.set_fact:
+        ib_profile_uuid: "{{ by_tag.profiles[0].uuid }}"
+        ib_uuids: "{{ everything.inbounds | items2dict(key_name='tag', value_name='uuid') }}"
+
+    # --- collisions -------------------------------------------------------
+
+    - name: Create a second profile, by name
+      kenyawest.remnawave.config_profile:
+        name: ib-other
+        config:
+          inbounds:
+            - tag: ib-other-in
+              protocol: shadowsocks
+              port: 8388
+              # The panel refuses a shadowsocks inbound without settings.
+              settings:
+                network: tcp,udp
+          outbounds:
+            - tag: DIRECT
+              protocol: freedom
+      register: other_created
+
+    - name: Refuse renaming the first profile to the name of the second
+      kenyawest.remnawave.config_profile:
+        inbound: ib-vless
+        name: ib-other
+      register: rename_taken
+      ignore_errors: true
+
+    - name: Refuse creating a profile by a new tag under a taken name
+      kenyawest.remnawave.config_profile:
+        inbound: ib-new
+        name: ib-other
+        config:
+          inbounds:
+            - tag: ib-new
+              protocol: vless
+      register: create_taken
+      ignore_errors: true
+
+    - name: Colliding names are refused with useful messages
+      ansible.builtin.assert:
+        that:
+          - rename_taken is failed
+          - "'already has that name' in rename_taken.msg"
+          - create_taken is failed
+          - "'already exists but has no inbound' in create_taken.msg"
+
+    # --- references by tag alone ------------------------------------------
+
+    - name: Create a node with inbound tags only
+      kenyawest.remnawave.node:
+        name: ib-node
+        address: 203.0.113.70
+        inbounds: [ib-vless, ib-trojan]
+      register: node_created
+
+    - name: Declare the node with its config profile named as well
+      kenyawest.remnawave.node:
+        name: ib-node
+        config_profile: ib-renamed
+        inbounds: [ib-trojan, ib-vless]
+      register: node_again
+
+    - name: Refuse node inbounds from two profiles
+      kenyawest.remnawave.node:
+        name: ib-node
+        inbounds: [ib-vless, ib-other-in]
+      register: node_mixed
+      ignore_errors: true
+
+    - name: A node's config profile follows from its inbound tags
+      ansible.builtin.assert:
+        that:
+          - node_created is changed
+          - node_created.node.configProfile.activeConfigProfileUuid == ib_profile_uuid
+          - >-
+            node_created.node.configProfile.activeInbounds | map(attribute='uuid') | sort
+            == [ib_uuids['ib-vless'], ib_uuids['ib-trojan']] | sort
+          - node_again is not changed
+          - node_mixed is failed
+          - "'different config profiles' in node_mixed.msg"
+
+    - name: Create a host with an inbound tag only
+      kenyawest.remnawave.host:
+        remark: ib-host
+        inbound: ib-trojan
+        address: ib.example.com
+        port: 443
+      register: host_created
+
+    - name: Declare the host again
+      kenyawest.remnawave.host:
+        remark: ib-host
+        inbound: ib-trojan
+      register: host_again
+
+    - name: Refuse a config profile without its inbound
+      kenyawest.remnawave.host:
+        remark: ib-host
+        config_profile: ib-renamed
+      register: host_profile_only
+      ignore_errors: true
+
+    - name: A host's config profile follows from its inbound tag
+      ansible.builtin.assert:
+        that:
+          - host_created is changed
+          - host_created.host.inbound.configProfileUuid == ib_profile_uuid
+          - host_created.host.inbound.configProfileInboundUuid == ib_uuids['ib-trojan']
+          - host_again is not changed
+          - host_profile_only is failed
+          - "'requires inbound' in host_profile_only.msg"
+
+    - name: Create an internal squad with plain inbound tags
+      kenyawest.remnawave.internal_squad:
+        name: ib-squad
+        inbounds:
+          - ib-vless
+          - tag: ib-other-in
+      register: squad_created
+
+    - name: Declare the squad in the profile-and-tag form
+      kenyawest.remnawave.internal_squad:
+        name: ib-squad
+        inbounds:
+          - profile: ib-renamed
+            tag: ib-vless
+          - profile: ib-other
+            tag: ib-other-in
+      register: squad_again
+
+    - name: Predict a squad on an inbound that does not exist yet
+      kenyawest.remnawave.internal_squad:
+        name: ib-squad
+        inbounds: [ib-future]
+      check_mode: true
+      register: squad_future
+
+    - name: Refuse that squad for real
+      kenyawest.remnawave.internal_squad:
+        name: ib-squad
+        inbounds: [ib-future]
+      register: squad_unknown
+      ignore_errors: true
+
+    - name: Squad inbounds resolve by tag alone, across profiles
+      ansible.builtin.assert:
+        that:
+          - squad_created is changed
+          - squad_created.squad.inbounds | map(attribute='uuid') | sort
+            == [ib_uuids['ib-vless'], other_created.profile.inbounds[0].uuid] | sort
+          - squad_again is not changed
+          - squad_future is changed
+          - squad_unknown is failed
+          - "'No config profile has an inbound' in squad_unknown.msg"
+
+    # --- the role ---------------------------------------------------------
+
+    - name: Retag a profile by inbound tag through the role, and gather it
+      ansible.builtin.include_role:
+        name: kenyawest.remnawave.remnawave
+      vars:
+        remnawave_panel_url: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+        remnawave_token: test-token
+        remnawave_api_key: sekret
+        remnawave_config_profiles:
+          - inbound: ib-other-in
+            tags: [VIA_ROLE]
+        remnawave_gather:
+          config_profiles:
+            inbound: ib-other-in
+
+    - name: The role addressed the profile by its inbound
+      ansible.builtin.assert:
+        that:
+          - remnawave_gathered.config_profiles | map(attribute='name') | list == ['ib-other']
+          - remnawave_gathered.config_profiles[0].tags == ['VIA_ROLE']
+          - remnawave_gathered.inbounds | map(attribute='tag') | list == ['ib-other-in']
+
+    # --- deletion ---------------------------------------------------------
+
+    - name: Delete the second profile by its inbound tag
+      kenyawest.remnawave.config_profile:
+        inbound: ib-other-in
+        state: absent
+      register: deleted
+
+    - name: Delete it again
+      kenyawest.remnawave.config_profile:
+        inbound: ib-other-in
+        state: absent
+      register: deleted_again
+
+    - name: Read the deleted profile back
+      kenyawest.remnawave.config_profile_info:
+        name: ib-other
+      register: gone
+
+    - name: The profile is deleted once
+      ansible.builtin.assert:
+        that:
+          - deleted is changed
+          - deleted_again is not changed
+          - gone.profiles == []

@@ -23,13 +23,14 @@
 
     - name: Manage config profiles
       kenyawest.remnawave.config_profile:
-        name: "{{ item.name }}"
+        name: "{{ item.name | default(omit) }}"
+        inbound: "{{ item.inbound | default(omit) }}"
         state: "{{ item.state | default('present') }}"
         config: "{{ item.config | default(omit) }}"
         tags: "{{ item.tags | default(omit) }}"
       loop: "{{ remnawave_config_profiles }}"
       loop_control:
-        label: "{{ item.name }}"
+        label: "{{ item.inbound | default(item.name | default('')) }}"
 
     - name: Manage internal squads
       kenyawest.remnawave.internal_squad:

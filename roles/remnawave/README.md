@@ -113,8 +113,8 @@ the play - the modules fall back to them.
 | `remnawave_gather` | dict | `{}` | Not desired state: which entities to read back afterwards. See [Reading entities back](#reading-entities-back). |
 
 Within a list item, only the identifier is mandatory (`name`, `remark` or
-`username`); every other key is optional and simply not sent when omitted,
-which leaves that field alone on the panel.
+`username`, or `inbound` for a config profile); every other key is optional
+and simply not sent when omitted, which leaves that field alone on the panel.
 
 ## Entry keys per stage
 
@@ -135,7 +135,8 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 
 | Key | Type | Notes |
 | --- | --- | --- |
-| `name` | str | Required. Identifier. |
+| `name` | str | Identifier, unless `inbound` is set; then it renames the profile, and is required only to create it. One of `name` and `inbound` is required. |
+| `inbound` | str | Tag of an inbound of the profile, which then identifies it instead of `name`. A `config` given alongside must still declare this inbound. |
 | `state` | str | `present` (default) or `absent`. |
 | `config` | dict or JSON str | The Xray configuration. Authoritative: the panel's stored config is made exactly equal to it. Required when the profile does not exist yet. |
 | `tags` | list of str | Authoritative when set. See [tag format](#behaviour-worth-knowing). |
@@ -146,7 +147,7 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | --- | --- | --- |
 | `name` | str | Required. Identifier. |
 | `state` | str | `present` (default) or `absent`. |
-| `inbounds` | list | Authoritative when set. Each item is either `{profile: <profile name>, tag: <inbound tag>}` or a plain inbound UUID. Required when the squad does not exist yet. |
+| `inbounds` | list | Authoritative when set. Each item is a plain inbound tag (or UUID), or `{tag: <inbound tag>, profile: <profile name>}` where `profile` is optional. Required when the squad does not exist yet. |
 | `tags` | list of str | Tags of the squad itself, unrelated to the inbound `tag` above. Authoritative when set. |
 
 **`remnawave_external_squads`** - external squads.
@@ -166,8 +167,8 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | `linked_hosts` | str | `ignore` (default), `enable`, `disable`, `delete` - what to do with hosts bound to this node. |
 | `address` | str | IP or DNS name. Required when the node does not exist yet. |
 | `port` | int | Port of the node service. |
-| `config_profile` | str | Config profile to activate, by name. Required at creation. |
-| `inbounds` | list of str | Inbound tags of that profile to activate. Authoritative when set. Required at creation. |
+| `config_profile` | str | Config profile to activate, by name. Optional: it is the profile holding `inbounds`. |
+| `inbounds` | list of str | Inbound tags to activate, all from one profile. Authoritative when set. Required at creation. |
 | `traffic_tracking` | bool | Whether traffic tracking is active. |
 | `traffic_limit` | int or str | Bytes, or a human-readable size such as `10TB`. |
 | `notify_percent` | int | Percentage of the limit that triggers a notification. |
@@ -185,8 +186,8 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | `remark` | str | The label shown in the client. Required, and the identifier, unless `identify_by: address`; then it is optional and renames the host. |
 | `state` | str | `present` (default), `enabled`, `disabled`, `absent`. |
 | `nodes` | list of str | Nodes the host is bound to, by name. Authoritative when set; an empty list unbinds it, and an unbound host is served from every node. |
-| `config_profile` | str | Config profile the inbound belongs to. Required at creation. |
-| `inbound` | str | Inbound tag within that profile. Required at creation. |
+| `config_profile` | str | Config profile the inbound belongs to. Optional: it is the profile holding `inbound`. |
+| `inbound` | str | Inbound tag. Required at creation. |
 | `address` | str | Address (domain or IP) advertised to clients. Required, and the identifier, with `identify_by: address`. |
 | `port` | int | Port advertised to clients. |
 | `path` | str | Path for path-based transports. |
@@ -253,7 +254,7 @@ matching info module; leave it empty (or `{}`) to read everything.
 | Key | Options (of the module) | Published as |
 | --- | --- | --- |
 | `snippets` | `name` (`snippet_info`) | `remnawave_gathered.snippets` |
-| `config_profiles` | `name` (`config_profile_info`) | `remnawave_gathered.config_profiles` |
+| `config_profiles` | `name` or `inbound` (`config_profile_info`) | `remnawave_gathered.config_profiles`, plus their inbounds with UUIDs and profile names as `remnawave_gathered.inbounds` |
 | `internal_squads` | `name` (`internal_squad_info`) | `remnawave_gathered.internal_squads` |
 | `external_squads` | `name` (`external_squad_info`) | `remnawave_gathered.external_squads` |
 | `nodes` | `name` (`node_info`) | `remnawave_gathered.nodes` |
@@ -371,10 +372,19 @@ rather than on the role: for example define the users play separately, or pass
 ### Naming and identifiers
 
 Entities are addressed by stable human identifiers: node `name`, host
-`remark`, user `username`, profile and squad `name`. Cross-references
-(`config_profile`, `inbounds`, `internal_squads`, `nodes`) are given by name or
-tag and resolved to UUIDs internally, so UUIDs never need to appear in your
-variables. Changing an identifier is not a rename - the role will create a new
+`remark`, user `username`, squad `name`, and profile `name` or the `inbound`
+tag of one of its inbounds. Cross-references (`config_profile`, `inbounds`,
+`internal_squads`, `nodes`) are given by name or tag and resolved to UUIDs
+internally, so UUIDs never need to appear in your variables. Inbound tags are
+unique across profiles, so wherever an inbound is referenced, its config
+profile may be left out.
+
+```yaml
+remnawave_config_profiles:
+  # whatever the profile holding vless-reality is called, tag it
+  - inbound: vless-reality
+    tags: [PRODUCTION]
+``` Changing an identifier is not a rename - the role will create a new
 entity and leave the old one, so rename in the panel or delete explicitly.
 
 ## Examples

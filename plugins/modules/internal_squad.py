@@ -14,9 +14,9 @@ description:
   - Create, update and delete internal squads of a Remnawave panel in a
     declarative way.
   - Squads are identified by their C(name).
-  - Inbounds are referenced as C(profile-name:inbound-tag) pairs or plain
-    inbound UUIDs and resolved automatically. The list is authoritative when
-    set.
+  - Inbounds are referenced by tag, optionally together with their config
+    profile, or by UUID, and resolved automatically. The list is
+    authoritative when set.
 author: Kenya-West (@Kenya-West)
 extends_documentation_fragment:
   - kenyawest.remnawave.remnawave
@@ -45,9 +45,12 @@ options:
   inbounds:
     description:
       - Inbounds that belong to the squad.
-      - Each item is either a dict with C(profile) (config profile name or
-        UUID) and C(tag) (inbound tag or UUID), or a plain inbound UUID
-        string.
+      - Each item is an inbound tag or UUID as a plain string, or a dict with
+        C(tag) (inbound tag or UUID) and optionally C(profile) (config profile
+        name or UUID), which the inbound must then belong to.
+      - Inbound tags are unique across config profiles, so the plain tag is
+        enough; the dict form is kept for playbooks written before plain tags
+        were accepted.
       - Required when the squad does not exist yet.
     type: list
     elements: raw
@@ -74,10 +77,20 @@ EXAMPLES = r'''
     name: default-squad
     state: present
     inbounds:
-      - profile: default-profile
-        tag: vless-reality
+      - vless-reality
+      - ss-inbound
     tags:
       - PAID
+
+- name: The same, naming the config profile of an inbound as well
+  kenyawest.remnawave.internal_squad:
+    panel_url: https://panel.example.com
+    token: "{{ remnawave_token }}"
+    name: default-squad
+    inbounds:
+      - profile: default-profile
+        tag: vless-reality
+      - ss-inbound
 
 - name: Remove a squad
   kenyawest.remnawave.internal_squad:
@@ -113,17 +126,21 @@ def resolve_inbounds(module, client, items):
     for item in items:
         if isinstance(item, str) and is_uuid(item):
             uuids.append(item)
-        elif isinstance(item, dict) and 'profile' in item and 'tag' in item:
-            resolved = resolve_for_check_mode(
-                module,
-                lambda: resolve_inbound_uuids(
-                    client, item['profile'], [item['tag']])[1],
-                ['%s:%s' % (item['profile'], item['tag'])])
-            uuids.extend(resolved)
+            continue
+        if isinstance(item, str):
+            profile, tag = None, item
+        elif isinstance(item, dict) and 'tag' in item:
+            profile, tag = item.get('profile'), item['tag']
         else:
             module.fail_json(
-                msg='Each inbound must be an inbound UUID or a dict with '
-                    'profile and tag keys, got: %r' % (item,))
+                msg='Each inbound must be an inbound tag or UUID, or a dict '
+                    'with a tag key and optionally a profile key, got: %r'
+                    % (item,))
+        resolved = resolve_for_check_mode(
+            module,
+            lambda: resolve_inbound_uuids(client, profile, [tag])[1],
+            [tag if profile is None else '%s:%s' % (profile, tag)])
+        uuids.extend(resolved)
     return uuids
 
 

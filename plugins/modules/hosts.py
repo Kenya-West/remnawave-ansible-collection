@@ -94,11 +94,12 @@ options:
       config_profile:
         description:
           - Config profile the host's inbound belongs to, by name or UUID.
-          - Required when the host does not exist yet.
+          - Optional, since it is the profile holding O(hosts[].inbound). Set,
+            the inbound must belong to it. Requires O(hosts[].inbound).
         type: str
       inbound:
         description:
-          - Inbound of the config profile, by tag or UUID.
+          - Inbound the host serves, by tag or UUID.
           - Required when the host does not exist yet.
         type: str
       address:

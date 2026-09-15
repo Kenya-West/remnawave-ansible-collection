@@ -27,6 +27,9 @@
             - tag: tags-inbound
               protocol: vless
               port: 443
+          outbounds:
+            - tag: DIRECT
+              protocol: freedom
         tags: [PRODUCTION, REGION:EU]
       register: profile_created
 
@@ -71,6 +74,9 @@
             - tag: tags-inbound
               protocol: vless
               port: 8443
+          outbounds:
+            - tag: DIRECT
+              protocol: freedom
         tags: [STAGING]
       register: profile_both
 
@@ -89,6 +95,9 @@
             - tag: tags-inbound
               protocol: vless
               port: 443
+          outbounds:
+            - tag: DIRECT
+              protocol: freedom
       register: profile_config_only
 
     - name: Omitting tags leaves them alone

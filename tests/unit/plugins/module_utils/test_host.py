@@ -109,10 +109,24 @@ class TestPlanHost(unittest.TestCase):
             'configProfileInboundUuid': INBOUND_UUID,
         })
 
+    def test_inbound_tag_alone_names_its_config_profile(self):
+        options = dict(NEW_HOST, config_profile=None)
+        plan = self.plan(remark='Frankfurt', **options)
+        self.assertEqual(plan['action'], 'create')
+        self.assertEqual(plan['payload']['inbound'], {
+            'configProfileUuid': PROFILE_UUID,
+            'configProfileInboundUuid': INBOUND_UUID,
+        })
+
+    def test_config_profile_without_inbound_is_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            self.plan(remark='Amsterdam', config_profile='default-profile')
+        self.assertIn('config_profile requires inbound', str(caught.exception))
+
     def test_creation_requires_the_inbound_and_address(self):
         with self.assertRaises(ValueError) as caught:
             self.plan(remark='Frankfurt', port=443)
-        self.assertIn('config_profile, inbound, address', str(caught.exception))
+        self.assertIn('inbound, address', str(caught.exception))
 
     def test_absent_host_that_is_missing_needs_nothing(self):
         plan = self.plan(remark='Nowhere', state='absent')

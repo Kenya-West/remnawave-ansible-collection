@@ -149,8 +149,10 @@ def build_fields(module, client, params):
             }))
 
     if params['config_profile'] is not None or params['inbound'] is not None:
-        if params['config_profile'] is None or params['inbound'] is None:
-            raise ValueError('config_profile and inbound must be set together')
+        # The inbound alone suffices: its tag is unique across profiles, so
+        # it names its profile too.
+        if params['inbound'] is None:
+            raise ValueError('config_profile requires inbound')
         profile_uuid, inbound_uuids = resolve_for_check_mode(
             module,
             lambda: resolve_inbound_uuids(
@@ -197,7 +199,7 @@ def plan_host(module, client, params):
     patch, before, after = build_patch(resolved, current, fields)
 
     if current is None:
-        missing = [opt for opt in ('config_profile', 'inbound', 'address', 'port')
+        missing = [opt for opt in ('inbound', 'address', 'port')
                    if params[opt] is None]
         if missing:
             raise ValueError('Creating host %r requires: %s'

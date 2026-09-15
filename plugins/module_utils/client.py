@@ -83,7 +83,9 @@ class RemnawaveClient(object):
         raw = b''
         if response is not None:
             raw = response.read()
-        elif info.get('body'):
+        # On an HTTP error fetch_url hands back the exception itself as the
+        # response, its body already read out into info['body'].
+        if not raw and info.get('body'):
             raw = info['body']
 
         parsed = None

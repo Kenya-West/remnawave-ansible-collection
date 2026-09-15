@@ -1,0 +1,21 @@
+---
+minor_changes:
+  - config_profile - add ``inbound``, which identifies the profile by the tag (or UUID) of one of
+    its inbounds instead of by name. ``name`` then renames the profile, and a ``config`` that no
+    longer declares the identifying inbound is refused.
+  - config_profile_info - add ``inbound`` to look a profile up by an inbound tag or UUID, and return
+    ``inbounds``, the inbounds of the returned profiles with their UUIDs and the UUID and name of
+    their profile.
+  - host, hosts - make ``config_profile`` optional; the profile is the one holding ``inbound``, since
+    inbound tags are unique across profiles.
+  - node - make ``config_profile`` optional; the profile is the one holding ``inbounds``, which must
+    all belong to it.
+  - internal_squad - accept plain inbound tags in ``inbounds``, and dicts with ``tag`` but no ``profile``.
+  - remnawave role - pass ``inbound`` through for ``remnawave_config_profiles``, accept ``inbound``
+    when gathering config profiles, and publish their inbounds as ``remnawave_gathered.inbounds``.
+bugfixes:
+  - config_profile - ignore the ``settings.clients`` list the panel adds to every inbound when it
+    stores an updated config; a profile whose config had been updated once used to report a change
+    on every later run.
+  - all modules - report the panel's own error message and error code for failed requests; they
+    were replaced by the bare HTTP status text, such as ``HTTP Error 500 Internal Server Error``.

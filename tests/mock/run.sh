@@ -30,6 +30,9 @@
 # Part 8 (batch.yml) exercises managing many hosts in one task, including
 # how few requests it makes and that a bad entry changes nothing.
 #
+# Part 9 (inbounds.yml) exercises addressing config profiles by inbound tag,
+# looking up the UUIDs behind a tag, and referring to inbounds by tag alone.
+#
 # Requires the collection to be reachable via ANSIBLE_COLLECTIONS_PATH,
 # e.g.  tests/mock/run.sh  from a checkout symlinked as
 # <path>/ansible_collections/kenyawest/remnawave.
@@ -127,6 +130,14 @@ if out="$(run "$HERE/batch.yml")"; then
     echo "PASS: hosts managed in one task"
 else
     echo "FAIL: hosts managed in one task"
+    echo "$out" | tail -60
+    exit 1
+fi
+
+if out="$(run "$HERE/inbounds.yml")"; then
+    echo "PASS: config profiles addressed by inbound tag"
+else
+    echo "FAIL: config profiles addressed by inbound tag"
     echo "$out" | tail -60
     exit 1
 fi

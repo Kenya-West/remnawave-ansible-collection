@@ -29,6 +29,9 @@
             - tag: ss-inbound
               protocol: shadowsocks
               port: 8388
+              # A real panel refuses a shadowsocks inbound without settings.
+              settings:
+                network: tcp,udp
         tags: [PRODUCTION]
 
     remnawave_internal_squads:

@@ -2,7 +2,7 @@
 # Copyright (c) 2026, Kenya-West <Kenya-West@outlook.com>
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-"""Unit tests for the HTTP client's caching of listings."""
+"""Unit tests for the HTTP client's caching of listings and its errors."""
 
 from __future__ import absolute_import, division, print_function
 __metaclass__ = type
@@ -13,7 +13,7 @@ import unittest
 
 from ansible_collections.kenyawest.remnawave.plugins.module_utils import client as client_module
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import (
-    RemnawaveClient,
+    RemnawaveApiError, RemnawaveClient,
 )
 
 
@@ -82,6 +82,33 @@ class TestListingCache(unittest.TestCase):
         self.client.patch('/api/hosts', {'uuid': 'x'})
         self.client.get('/api/hosts', cached=True)
         self.assertEqual(len(self.gets()), 2)
+
+
+def failing_transport(module, url, data=None, headers=None, method=None,
+                      timeout=None):
+    """fetch_url on an HTTP error: the exception comes back as the response,
+    already read out, and its body is in the info dict instead."""
+    body = json.dumps({'message': "Config doesn't have outbounds.",
+                       'errorCode': 'A061'}).encode()
+    return io.BytesIO(b''), {'status': 500, 'body': body,
+                             'msg': 'HTTP Error 500: Internal Server Error'}
+
+
+class TestErrors(unittest.TestCase):
+
+    def setUp(self):
+        self.original = client_module.fetch_url
+        client_module.fetch_url = failing_transport
+
+    def tearDown(self):
+        client_module.fetch_url = self.original
+
+    def test_the_panel_message_is_reported(self):
+        with self.assertRaises(RemnawaveApiError) as caught:
+            RemnawaveClient(FakeModule()).patch('/api/config-profiles', {'uuid': 'x'})
+        self.assertIn("Config doesn't have outbounds.", str(caught.exception))
+        self.assertEqual(caught.exception.status, 500)
+        self.assertEqual(caught.exception.error_code, 'A061')
 
 
 if __name__ == '__main__':

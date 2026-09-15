@@ -76,6 +76,19 @@ takes `identify_by` (`remark`, the default, or `address`), and the option not
 in use becomes an ordinary managed field - which is how a host found by its
 domain can be renamed.
 
+Config profiles are the other case. A profile's name is chosen in the panel
+and changes freely there, while the tags of its inbounds are written in the
+Xray config the playbook already carries, and the panel keeps them unique
+across all profiles. `config_profile` therefore takes `inbound` as an
+alternative identifier, which turns `name` into a managed field. Two guards
+keep that identifier reliable: a `config` that no longer declares the
+identifying inbound is refused, since the next run could not find the
+profile again, and a `name` already held by another profile is refused
+before the panel's conflict error would be. The same uniqueness lets every
+cross-reference to inbounds (`host`, `node`, `internal_squad`) leave the
+profile out and derive it from the tags; a node's inbounds must then all
+come from one profile.
+
 What does not change is the rule that ambiguity is an error. Remarks are
 unique in practice; addresses are not, since one domain can serve several
 inbounds or ports. An identifier matching more than one host fails the task

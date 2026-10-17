@@ -267,6 +267,13 @@ def bulk_host_action(client, action, uuids):
     client.post('/api/hosts/bulk/%s' % action, {'uuids': list(uuids)})
 
 
+def bulk_update_hosts(client, uuids, fields):
+    """Give many hosts the same field values in one request."""
+    if not uuids:
+        return
+    client.patch('/api/hosts/bulk/update', dict(fields, uuids=list(uuids)))
+
+
 def list_snippets(client):
     data = client.get('/api/snippets', cached=True)
     return (data or {}).get('snippets', [])

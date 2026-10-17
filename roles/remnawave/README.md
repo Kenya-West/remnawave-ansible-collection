@@ -66,9 +66,11 @@ panel URL, so the play normally runs on `localhost` (or on any host with
 network access to the panel). Prefer `localhost`: against a remote host every
 task goes over SSH, which costs seconds per task.
 
-Hosts are applied in a single `kenyawest.remnawave.hosts` task rather than a
-loop, so the stage reads the panel once however many hosts it declares, and a
-bad entry fails it before any host is written.
+Nodes and hosts are applied in a single `kenyawest.remnawave.nodes` and
+`kenyawest.remnawave.hosts` task each rather than a loop, so each stage reads
+the panel once however many entries it declares, writes several at a time,
+and fails over a bad entry before anything is written. Both arrange the panel
+in the order of `remnawave_nodes` and `remnawave_hosts`.
 
 ## Requirements
 
@@ -362,8 +364,8 @@ inventory/
 
 Because empty variables mean "manage nothing of this kind", you can split the
 work across plays or tag them. To reconcile users alone, set only
-`remnawave_users`; the node, host and profile stages loop over empty lists and
-report `ok=0`.
+`remnawave_users`; the node and host stages are skipped, and the profile stages
+loop over empty lists and report `ok=0`.
 
 To run one stage of a fully populated variable set, use `--limit` on the data
 rather than on the role: for example define the users play separately, or pass

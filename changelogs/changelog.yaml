@@ -142,10 +142,9 @@ releases:
   1.2.1:
     changes:
       bugfixes:
-      - remnawave role - pass ``vless_route_id``, ``override_sni_from_address``,
-        ``keep_sni_blank``, ``exclude_from_subscription_types`` and ``internal_squads``
-        of ``remnawave_hosts`` entries through to the panel; the host stage used to
-        drop them silently.
+      - remnawave role - pass ``vless_route_id``, ``override_sni_from_address``, ``keep_sni_blank``,
+        ``exclude_from_subscription_types`` and ``internal_squads`` of ``remnawave_hosts``
+        entries through to the panel; the host stage used to drop them silently.
       minor_changes:
       - all modules - fetch the listings used to resolve names (config profiles, squads,
         nodes, hosts, snippets) at most once per module run, until the module writes
@@ -165,3 +164,66 @@ releases:
       name: hosts
       namespace: ''
     release_date: '2026-09-14'
+  1.3.0:
+    changes:
+      bugfixes:
+      - all modules - report the panel's own error message and error code for failed
+        requests; they were replaced by the bare HTTP status text, such as ``HTTP
+        Error 500 Internal Server Error``.
+      - config_profile - ignore the ``settings.clients`` list the panel adds to every
+        inbound when it stores an updated config; a profile whose config had been
+        updated once used to report a change on every later run.
+      minor_changes:
+      - all modules - return ``api_trace``, every request made with its status and
+        duration, and ``api_seconds``, their total, when run with ``-vvv``.
+      - config_profile - add ``inbound``, which identifies the profile by the tag
+        (or UUID) of one of its inbounds instead of by name. ``name`` then renames
+        the profile, and a ``config`` that no longer declares the identifying inbound
+        is refused.
+      - config_profile_info - add ``inbound`` to look a profile up by an inbound tag
+        or UUID, and return ``inbounds``, the inbounds of the returned profiles with
+        their UUIDs and the UUID and name of their profile.
+      - host, hosts - make ``config_profile`` optional; the profile is the one holding
+        ``inbound``, since inbound tags are unique across profiles.
+      - host, hosts - read the listings planning needs (hosts, nodes, config profiles,
+        internal squads) concurrently up front instead of one after another.
+      - hosts - delete hosts in one bulk request, update hosts given the very same
+        change together in one bulk update (falling back to one request per host on
+        panels without it), and run these update requests up to the new ``parallelism``
+        option (default ``4``) at a time. A rejected write now stops the task before
+        any later write of the batch, and ``results`` lists the entries that were
+        carried out.
+      - hosts - put the listed hosts in list order in the panel, with one reorder
+        request after the other writes and only when they are out of order, under
+        the new ``ordered`` option (default ``true``). Hosts not listed keep their
+        places, and a host that only moves is reported as an ``update``. This lets
+        creations run up to ``parallelism`` at a time too; with ``ordered=false``
+        they still go one by one in list order and the panel's order is left alone.
+      - internal_squad - accept plain inbound tags in ``inbounds``, and dicts with
+        ``tag`` but no ``profile``.
+      - node - make ``config_profile`` optional; the profile is the one holding ``inbounds``,
+        which must all belong to it.
+      - node - share its planning and applying code with the new ``nodes`` module,
+        and read the listings it needs concurrently up front; behaviour is unchanged.
+      - nodes - new module managing many nodes in one task, with the options of ``node``
+        per entry. It reads each listing once, enables and disables nodes in one request
+        each, updates nodes given the very same change of country code, consumption
+        multiplier, tags, note or config profile in one bulk request, disables nodes
+        created disabled in one request, and runs the other writes up to ``parallelism``
+        (default ``4``) at a time. Like ``hosts``, it puts the listed nodes in list
+        order under ``ordered`` (default ``true``).
+      - remnawave role - apply ``remnawave_nodes`` in one ``kenyawest.remnawave.nodes``
+        task instead of a loop of ``kenyawest.remnawave.node``. A node may now appear
+        only once in the list, and the nodes are arranged in the panel in list order.
+      - remnawave role - pass ``inbound`` through for ``remnawave_config_profiles``,
+        accept ``inbound`` when gathering config profiles, and publish their inbounds
+        as ``remnawave_gathered.inbounds``.
+    fragments:
+    - config-profile-inbound-tags.yml
+    - hosts-bulk-parallel-writes.yml
+    - nodes-batch-module.yml
+    modules:
+    - description: Manage many Remnawave nodes in one task.
+      name: nodes
+      namespace: ''
+    release_date: '2026-10-17'

@@ -290,7 +290,7 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import 
     remnawave_argument_spec,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.host import (
-    HOST_REQUIRED_IF, apply_host_plan, host_options, plan_host,
+    HOST_REQUIRED_IF, apply_host_plan, host_listings, host_options, plan_host,
 )
 
 
@@ -305,6 +305,7 @@ def main():
 
     client = RemnawaveClient(module)
     try:
+        client.prefetch(host_listings([module.params]))
         plan = plan_host(module, client, module.params)
         module.exit_json(**apply_host_plan(module, client, plan))
     except RemnawaveApiError as exc:

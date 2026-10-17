@@ -51,26 +51,38 @@
       loop_control:
         label: "{{ item.name }}"
 
+    # One task for every node, as for the hosts below: a loop would be a
+    # module run per node, writing one node at a time. Keys the module does
+    # not know are dropped, as the loop used to ignore them.
     - name: Manage nodes
-      kenyawest.remnawave.node:
-        name: "{{ item.name }}"
-        state: "{{ item.state | default('present') }}"
-        linked_hosts: "{{ item.linked_hosts | default(omit) }}"
-        address: "{{ item.address | default(omit) }}"
-        port: "{{ item.port | default(omit) }}"
-        config_profile: "{{ item.config_profile | default(omit) }}"
-        inbounds: "{{ item.inbounds | default(omit) }}"
-        traffic_tracking: "{{ item.traffic_tracking | default(omit) }}"
-        traffic_limit: "{{ item.traffic_limit | default(omit) }}"
-        notify_percent: "{{ item.notify_percent | default(omit) }}"
-        traffic_reset_day: "{{ item.traffic_reset_day | default(omit) }}"
-        country_code: "{{ item.country_code | default(omit) }}"
-        consumption_multiplier: "{{ item.consumption_multiplier | default(omit) }}"
-        tags: "{{ item.tags | default(omit) }}"
-        note: "{{ item.note | default(omit) }}"
-      loop: "{{ remnawave_nodes }}"
-      loop_control:
-        label: "{{ item.name }}"
+      kenyawest.remnawave.nodes:
+        nodes: >-
+          {{
+            remnawave_nodes
+            | map('dict2items')
+            | map('selectattr', 'key', 'in', __remnawave_node_keys)
+            | map('list')
+            | map('items2dict')
+            | list
+          }}
+      vars:
+        __remnawave_node_keys:
+          - name
+          - state
+          - linked_hosts
+          - address
+          - port
+          - config_profile
+          - inbounds
+          - traffic_tracking
+          - traffic_limit
+          - notify_percent
+          - traffic_reset_day
+          - country_code
+          - consumption_multiplier
+          - tags
+          - note
+      when: remnawave_nodes | length > 0
 
     # One task for every host: a loop would be a module run per host, each
     # reading the panel's hosts, nodes and profiles again. Keys the module

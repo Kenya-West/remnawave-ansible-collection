@@ -33,6 +33,9 @@
 # Part 9 (inbounds.yml) exercises addressing config profiles by inbound tag,
 # looking up the UUIDs behind a tag, and referring to inbounds by tag alone.
 #
+# Part 10 (nodes.yml) exercises managing many nodes in one task, including
+# the bulk requests it makes and putting the nodes in list order.
+#
 # Requires the collection to be reachable via ANSIBLE_COLLECTIONS_PATH,
 # e.g.  tests/mock/run.sh  from a checkout symlinked as
 # <path>/ansible_collections/kenyawest/remnawave.
@@ -138,6 +141,14 @@ if out="$(run "$HERE/inbounds.yml")"; then
     echo "PASS: config profiles addressed by inbound tag"
 else
     echo "FAIL: config profiles addressed by inbound tag"
+    echo "$out" | tail -60
+    exit 1
+fi
+
+if out="$(run "$HERE/nodes.yml")"; then
+    echo "PASS: nodes managed in one task"
+else
+    echo "FAIL: nodes managed in one task"
     echo "$out" | tail -60
     exit 1
 fi

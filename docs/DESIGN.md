@@ -33,8 +33,11 @@ Consequences:
 - `module_utils/common.py` - the desired/current comparison engine
   (`FieldSpec`, `build_patch`), value normalization (sizes, timestamps,
   sets), the common argument spec, and check-mode helpers.
-- `module_utils/host.py` - the host options, and planning and applying one
-  host's change, shared by `host` and `hosts`.
+- `module_utils/host.py` and `module_utils/node.py` - the host and node
+  options, and planning and applying one entity's change, shared by `host`
+  and `hosts`, and by `node` and `nodes`.
+- `module_utils/batch.py` - what the batch modules share in writing: running
+  writes concurrently and putting a batch in list order.
 - `plugins/modules/*` - one file per resource; mostly declarative field
   tables plus the create/update/delete choreography.
 
@@ -127,6 +130,7 @@ downloads the same host, node and profile listings to resolve the same
 names. `hosts` exists for that case only: it is `host` taking a list, not a
 different model. Its entries are the options of `host`, and both modules go
 through the same planning and applying code, so the two cannot drift apart.
+`nodes` is the same to `node`.
 
 The rules a batch follows:
 
@@ -134,20 +138,49 @@ The rules a batch follows:
   whole task before the first request that changes anything, and the error
   names the entry. A half-applied list is the outcome most worth avoiding.
 - Entries are planned against the panel as it was when the task started.
-  Each host may therefore be declared once; a second entry addressing the
-  same host, by whatever identifier, is refused rather than merged or
-  applied in order.
-- A write the panel rejects still stops the task at that entry. The entries
-  before it are applied and reported, since they cannot be rolled back.
+  Each entity may therefore be declared once; a second entry addressing the
+  same one, by whatever identifier, is refused rather than merged or
+  applied in order. So is a host that two nodes' `linked_hosts` would
+  treat differently.
+- Write with as few round trips as the panel allows. A change the panel
+  can make to many entities in one request is made so: deleting hosts,
+  enabling or disabling nodes, the very same update to several hosts, or to
+  several nodes where the panel's bulk update covers the fields changed.
+  The other requests run a few at a time, creations included. A round trip
+  to a panel behind a CDN and a reverse proxy costs far more than the
+  panel's work on one entity.
+- Writes go in steps whose order matters to the panel: deletions before
+  anything that could reuse what they free, a node's linked hosts before
+  the node is deleted, enabling and disabling a node before updating it,
+  as `node` does. Within a step, requests do not depend on one another.
+- The list order is the entities' order in the panel, by default. The
+  panel places a new entity after the existing ones, and concurrent
+  creations land in any order, so one reorder request puts the batch in
+  list order after everything else is written - and only when it is not in
+  that order already, which keeps a converged run free of writes. The
+  listed entities trade places among themselves: one the batch does not
+  declare keeps its place, as a batch never changes what it does not
+  declare. Without ordering, creations go one by one in list order
+  instead.
+- A write the panel rejects stops the task: nothing more is written. What
+  was written is reported, since it cannot be rolled back.
 - Results are per entry and in order, with `changed` on each, so the
   registered result reads like that of a loop.
 
 The client caches the listings used for lookups, by path, for the length of
 one module run and drops them on any write. That is what makes a batch read
 each listing once, and it spares single-entity modules repeated lookups too.
+`host`, `hosts`, `node` and `nodes` read the listings they will need all at
+once, before planning, rather than one after another as planning comes to
+them.
+
+Every module reports the requests it made, with their status and duration,
+as `api_trace` (and their total as `api_seconds`) when run with `-vvv`. That
+tells a slow panel apart from a slow controller.
 
 A batch module is added for a resource when playbooks really declare that
-resource in bulk; hosts generated from an inventory are the first such case.
+resource in bulk; hosts and nodes generated from an inventory are such
+cases.
 
 ## Check mode
 

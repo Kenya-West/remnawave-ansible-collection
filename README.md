@@ -52,7 +52,7 @@ only the Python standard library.
 | Module | Purpose |
 | --- | --- |
 | `user`, `user_info` | Panel users: expiration, traffic limits, squad membership, enable/disable; server-side filtering, sorting and pagination when reading |
-| `node`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, cascade onto linked hosts |
+| `node`, `nodes`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, cascade onto linked hosts. `nodes` manages a whole list in one task |
 | `host`, `hosts`, `host_info` | Subscription hosts: address, SNI, transport parameters, VLESS route id, node binding, subscription and squad visibility. Addressable by remark or by domain (`identify_by`). `hosts` manages a whole list in one task |
 | `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative). Addressable by name or by the tag of one of their inbounds; `config_profile_info` turns an inbound tag into the inbound's and the profile's UUIDs |
 | `snippet`, `snippet_info` | Reusable configuration fragments, with syncing into the profiles that embed them |
@@ -460,8 +460,11 @@ remotely, enable SSH pipelining (`pipelining = True` under
 
 **Manage many hosts with one task.** A `loop` over `host` is one module run
 per host, each reading the panel's hosts, nodes, config profiles and squads
-again. `hosts` takes the whole list, reads each listing once, and sends one
-request per host that needs a change:
+again. `hosts` takes the whole list, reads each listing once, and writes
+only what needs a change: deletions in one request, identical updates in
+one request, the rest a few at a time (`parallelism`). Then, with `ordered`
+(the default), one reorder request puts the listed hosts in list order,
+should they not stand in it already:
 
 ```yaml
 - kenyawest.remnawave.hosts:
@@ -475,6 +478,14 @@ request per host that needs a change:
 Every entry is planned before anything is written, so an entry that cannot
 be applied - an ambiguous remark, an unknown node, a host declared twice -
 fails the task with nothing changed. The role's host stage uses it.
+
+**Manage many nodes with one task**, for the same reasons: `nodes` is to
+`node` what `hosts` is to `host`. Nodes to enable and to disable go in one
+request each, the same change of country code, consumption multiplier, tags,
+note or config profile on several nodes in one request, nodes created
+disabled are disabled together afterwards, and the rest runs a few requests
+at a time. It too puts the listed nodes in list order (`ordered`). The
+role's node stage uses it.
 
 Within any module run, listings looked up to resolve names are fetched once
 and reused until the module writes something.
@@ -500,8 +511,10 @@ and reused until the module writes something.
 
 Infra billing, node plugins and integrations, HWID device management, API
 token management, passkeys and subscription page configs are not modeled
-(yet). Of the bulk endpoints, only the host ones used by the node cascade
-are. If you need something else, use the escape hatch:
+(yet). Of the bulk endpoints, only the host ones are used: by the node
+cascade, and by `hosts` to delete and update many hosts in one request -
+and the node ones, by `nodes` to enable, disable and update many nodes in
+one request. If you need something else, use the escape hatch:
 
 ```yaml
 - name: Reset traffic for a user (non-idempotent action)

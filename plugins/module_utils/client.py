@@ -14,6 +14,8 @@ from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
 import json
+import threading
+import time
 
 from ansible.module_utils.common.text.converters import to_native, to_text
 from ansible.module_utils.six.moves.urllib.parse import urlencode
@@ -52,6 +54,31 @@ class RemnawaveClient(object):
         # many names against the same listings, and a batch plans many
         # entities against them, so each is fetched once per run.
         self._cache = {}
+        # Requests may come from several threads at once (prefetch,
+        # run_parallel), so the cache and the trace are shared under a lock.
+        self._lock = threading.Lock()
+        self.trace = []
+        if getattr(module, '_verbosity', 0) >= 3:
+            self._report_trace_on_exit()
+
+    def _report_trace_on_exit(self):
+        """At -vvv, add every request made and its duration to the result.
+
+        Wraps this module's exit_json/fail_json rather than every module's
+        call sites, so all modules report it the same way.
+        """
+        def reporting(original):
+            def report(*args, **kwargs):
+                with self._lock:
+                    trace = list(self.trace)
+                kwargs.setdefault('api_trace', trace)
+                kwargs.setdefault('api_seconds',
+                                  round(sum(t['seconds'] for t in trace), 3))
+                original(*args, **kwargs)
+            return report
+
+        for name in ('exit_json', 'fail_json'):
+            setattr(self.module, name, reporting(getattr(self.module, name)))
 
     def request(self, method, path, query=None, data=None, ok_statuses=None):
         """Perform a request and return ``(status, parsed_json_or_None)``.
@@ -61,7 +88,8 @@ class RemnawaveClient(object):
         """
         if method != 'GET':
             # Any write may change what a cached listing holds.
-            self._cache.clear()
+            with self._lock:
+                self._cache.clear()
         if not path.startswith('/'):
             path = '/' + path
         url = self.base_url + path
@@ -74,6 +102,7 @@ class RemnawaveClient(object):
         if data is not None:
             body = json.dumps(data)
 
+        started = time.monotonic()
         response, info = fetch_url(
             self.module, url, data=body, headers=self.headers,
             method=method, timeout=self.timeout,
@@ -83,6 +112,9 @@ class RemnawaveClient(object):
         raw = b''
         if response is not None:
             raw = response.read()
+        with self._lock:
+            self.trace.append(dict(method=method, path=path, status=status,
+                                   seconds=round(time.monotonic() - started, 3)))
         # On an HTTP error fetch_url hands back the exception itself as the
         # response, its body already read out into info['body'].
         if not raw and info.get('body'):
@@ -130,14 +162,64 @@ class RemnawaveClient(object):
         modify what it returns.
         """
         cacheable = cached and not query
-        if cacheable and path in self._cache:
-            return self._cache[path]
+        if cacheable:
+            with self._lock:
+                if path in self._cache:
+                    return self._cache[path]
         ok = (404,) if allow_404 else ()
         status, parsed = self.request('GET', path, query=query, ok_statuses=ok)
         result = None if status == 404 else self._unwrap(parsed)
         if cacheable:
-            self._cache[path] = result
+            with self._lock:
+                self._cache[path] = result
         return result
+
+    def prefetch(self, paths):
+        """Read several listings at once into the cache of cached GETs.
+
+        Listings are independent of each other, and each read is a round
+        trip to the panel, so reading them all concurrently costs one round
+        trip instead of one per listing. Raises the first error met.
+        """
+        with self._lock:
+            missing = [p for p in paths if p not in self._cache]
+        for result in self.run_parallel(
+                [lambda p=p: self.get(p, cached=True) for p in missing],
+                len(missing)):
+            if isinstance(result, Exception):
+                raise result
+
+    @staticmethod
+    def run_parallel(calls, workers):
+        """Run callables on up to ``workers`` threads.
+
+        Returns their results in the order of ``calls``; a call that raised
+        has the exception in its place instead, so the caller decides which
+        failures matter.
+        """
+        results = [None] * len(calls)
+        pending = list(enumerate(calls))
+        pending.reverse()
+        lock = threading.Lock()
+
+        def work():
+            while True:
+                with lock:
+                    if not pending:
+                        return
+                    index, call = pending.pop()
+                try:
+                    results[index] = call()
+                except Exception as exc:  # pylint: disable=broad-except
+                    results[index] = exc
+
+        threads = [threading.Thread(target=work)
+                   for dummy in range(min(max(workers, 1), len(calls)))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        return results
 
     def post(self, path, data=None, query=None):
         dummy, parsed = self.request('POST', path, query=query, data=data)

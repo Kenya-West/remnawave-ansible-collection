@@ -14,12 +14,15 @@ import json
 import os
 import re
 import sys
+import threading
 import uuid as uuidlib
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlsplit
 
 TOKEN = os.environ.get('MOCK_TOKEN', 'test-token')
 API_KEY = os.environ.get('MOCK_API_KEY')
+
+DB_LOCK = threading.Lock()
 
 DB = {
     'config_profiles': {},
@@ -46,6 +49,10 @@ DB = {
         'hwidSettings': None,
     },
     'next_user_id': 1,
+    # The panel numbers hosts and nodes from sequences of its own as they
+    # are created; reordering sets positions without advancing them.
+    'next_host_position': 1,
+    'next_node_position': 1,
 }
 
 
@@ -154,6 +161,12 @@ class Handler(BaseHTTPRequestHandler):
     # --- routing -------------------------------------------------------
 
     def handle_any(self):
+        # Clients may send requests concurrently; the handlers share DB, so
+        # they take turns.
+        with DB_LOCK:
+            self.dispatch()
+
+    def dispatch(self):
         if not self.authorized():
             return
         path = self.path.split('?')[0]
@@ -312,8 +325,10 @@ def set_tags(handler, collection):
 
 def make_node(body):
     profile = body.get('configProfile', {})
+    DB['next_node_position'] += 1
     node = {
         'uuid': new_uuid(), 'id': 1, 'name': body['name'],
+        'viewPosition': DB['next_node_position'] - 1,
         'address': body.get('address'), 'port': body.get('port', 2222),
         'isDisabled': False, 'isConnected': False, 'isConnecting': False,
         'isTrafficTrackingActive': body.get('isTrafficTrackingActive', False),
@@ -334,7 +349,46 @@ def make_node(body):
 
 
 def node_list(handler):
-    handler.reply(200, list(DB['nodes'].values()))
+    handler.reply(200, sorted(DB['nodes'].values(),
+                              key=lambda n: n['viewPosition']))
+
+
+def set_node_profile(node, value):
+    node['configProfile'] = {
+        'activeConfigProfileUuid': value.get('activeConfigProfileUuid'),
+        'activeInbounds': [{'uuid': u} for u in value.get('activeInbounds', [])],
+    }
+
+
+def nodes_bulk(handler, kind):
+    """The bulk node endpoints: enable/disable, field update, profile
+    modification. All answer with no content."""
+    body = handler.read_body()
+    uuids = body.get('uuids', [])
+    if not uuids or any(u not in DB['nodes'] for u in uuids):
+        handler.not_found()
+        return
+    for node_uuid in uuids:
+        node = DB['nodes'][node_uuid]
+        if kind == '':
+            if body['action'] in ('ENABLE', 'DISABLE'):
+                node['isDisabled'] = body['action'] == 'DISABLE'
+        elif kind == '/update':
+            node.update(body['fields'])
+        else:
+            set_node_profile(node, body['configProfile'])
+    handler.reply(204, None)
+
+
+def nodes_reorder(handler):
+    """Set each given node's position, as the panel does; answers with
+    every node."""
+    body = handler.read_body()
+    for item in body.get('nodes', []):
+        if item['uuid'] in DB['nodes']:
+            DB['nodes'][item['uuid']]['viewPosition'] = item['viewPosition']
+    handler.reply(200, sorted(DB['nodes'].values(),
+                              key=lambda n: n['viewPosition']))
 
 
 def node_create(handler):
@@ -352,11 +406,7 @@ def node_update(handler):
         return
     for key, value in body.items():
         if key == 'configProfile':
-            node['configProfile'] = {
-                'activeConfigProfileUuid': value.get('activeConfigProfileUuid'),
-                'activeInbounds': [
-                    {'uuid': u} for u in value.get('activeInbounds', [])],
-            }
+            set_node_profile(node, value)
         elif key != 'uuid':
             node[key] = value
     handler.reply(200, node)
@@ -380,8 +430,9 @@ def node_action(handler, node_uuid, action):
 
 
 def make_host(body):
+    DB['next_host_position'] += 1
     host = {
-        'uuid': new_uuid(), 'viewPosition': 0,
+        'uuid': new_uuid(), 'viewPosition': DB['next_host_position'] - 1,
         'remark': body['remark'], 'address': body.get('address'),
         'port': body.get('port'), 'path': body.get('path'),
         'sni': body.get('sni'), 'host': body.get('host'),
@@ -409,7 +460,18 @@ hosts_list_raw, _h_create, host_update, host_delete = collection_handlers(
 
 
 def host_list(handler):
-    handler.reply(200, list(DB['hosts'].values()))
+    handler.reply(200, sorted(DB['hosts'].values(),
+                              key=lambda h: h['viewPosition']))
+
+
+def hosts_reorder(handler):
+    """Set each given host's position to the value given, as the panel
+    does: other hosts keep theirs, and positions may end up shared."""
+    body = handler.read_body()
+    for item in body.get('hosts', []):
+        if item['uuid'] in DB['hosts']:
+            DB['hosts'][item['uuid']]['viewPosition'] = item['viewPosition']
+    handler.reply(200, {'isUpdated': True})
 
 
 def host_create(handler):
@@ -426,6 +488,18 @@ def hosts_bulk(handler, action):
             DB['hosts'].pop(host_uuid, None)
         elif host_uuid in DB['hosts']:
             DB['hosts'][host_uuid]['isDisabled'] = (action == 'disable')
+    handler.reply(204, None)
+
+
+def hosts_bulk_update(handler):
+    body = handler.read_body()
+    uuids = body.pop('uuids', [])
+    missing = [u for u in uuids if u not in DB['hosts']]
+    if missing:
+        handler.not_found()
+        return
+    for host_uuid in uuids:
+        DB['hosts'][host_uuid].update(body)
     handler.reply(204, None)
 
 
@@ -665,11 +739,15 @@ ROUTES = [
     (r'PATCH /api/nodes', node_update),
     (r'DELETE /api/nodes/(%s)' % UUID, node_delete),
     (r'POST /api/nodes/(%s)/actions/(enable|disable)' % UUID, node_action),
+    (r'POST /api/nodes/bulk-actions(|/update|/profile-modification)', nodes_bulk),
+    (r'POST /api/nodes/actions/reorder', nodes_reorder),
     (r'GET /api/hosts', host_list),
     (r'POST /api/hosts', host_create),
     (r'PATCH /api/hosts', host_update),
     (r'DELETE /api/hosts/(%s)' % UUID, host_delete),
     (r'POST /api/hosts/bulk/(enable|disable|delete)', hosts_bulk),
+    (r'PATCH /api/hosts/bulk/update', hosts_bulk_update),
+    (r'POST /api/hosts/actions/reorder', hosts_reorder),
     (r'POST /api/users/(\d+)/actions/(enable|disable)', user_action),
     (r'POST /api/users', user_create),
     (r'PATCH /api/users', user_update),
@@ -696,7 +774,7 @@ ROUTES = [
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8443
-    server = HTTPServer(('127.0.0.1', port), Handler)
+    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
     sys.stderr.write('mock panel listening on 127.0.0.1:%d\n' % port)
     server.serve_forever()
 

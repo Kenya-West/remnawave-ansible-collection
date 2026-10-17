@@ -1,0 +1,419 @@
+---
+# Exercises managing many nodes in one task with kenyawest.remnawave.nodes.
+#
+# Covers: check mode predicting a batch without applying it, creation (new
+# nodes disabled in one bulk request afterwards), how few requests a batch
+# makes, idempotency, a change shared by every node going out as one bulk
+# request, a mix of enabling, disabling, updating and deleting along with the
+# linked hosts, putting the listed nodes in list order around a hand-made
+# one, and that a bad entry fails the task without changing anything.
+- name: Nodes managed in one task
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "{{ panel }}"
+      token: test-token
+      api_key: sekret
+  vars:
+    panel: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+    fleet:
+      - name: fleet-ams
+        state: enabled
+        address: 203.0.113.61
+        port: 2222
+        inbounds: [fleet-inbound]
+        country_code: NL
+      - name: fleet-fra
+        state: disabled
+        address: 203.0.113.62
+        port: 2222
+        inbounds: [fleet-inbound]
+        country_code: DE
+      - name: fleet-waw
+        address: 203.0.113.63
+        port: 2222
+        config_profile: fleet-profile
+        inbounds: [fleet-inbound]
+    # Request deltas between two readings of /api/_test/requests.
+    delta: >-
+      {{ (counts_after.json[request] | default(0))
+         - (counts_before.json[request] | default(0)) }}
+    fleet_order: >-
+      {{ listed.nodes | selectattr('name', 'match', 'fleet-')
+         | map(attribute='name') | list }}
+  tasks:
+    - name: Set up config profile
+      kenyawest.remnawave.config_profile:
+        name: fleet-profile
+        config:
+          inbounds:
+            - tag: fleet-inbound
+              protocol: vless
+              port: 443
+
+    # --- check mode ----------------------------------------------------------
+
+    - name: Predict the batch in check mode
+      kenyawest.remnawave.nodes:
+        nodes: "{{ fleet }}"
+      check_mode: true
+      diff: true
+      register: dry
+
+    - name: Read nodes after the dry run
+      kenyawest.remnawave.node_info:
+      register: listed
+
+    - name: Check mode predicted three creations and applied none
+      ansible.builtin.assert:
+        that:
+          - dry is changed
+          - dry.results | map(attribute='action') | list == ['create'] * 3
+          - dry.diff | length == 3
+          - dry.diff[1].after.isDisabled
+          - fleet_order == []
+        fail_msg: "unexpected dry run: {{ dry }}"
+
+    # --- creation, and how many requests it takes ----------------------------
+
+    - name: Requests before the batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: &test_headers
+          Authorization: Bearer test-token
+          X-Api-Key: sekret
+      register: counts_before
+
+    - name: Create the batch
+      kenyawest.remnawave.nodes:
+        nodes: "{{ fleet }}"
+      register: created
+
+    - name: Requests after the batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: Read nodes after creation
+      kenyawest.remnawave.node_info:
+      register: listed
+
+    - name: Every node was created as declared, in list order
+      ansible.builtin.assert:
+        that:
+          - created is changed
+          - created.results | map(attribute='action') | list == ['create'] * 3
+          - created.results | map(attribute='name') | list == ['fleet-ams', 'fleet-fra', 'fleet-waw']
+          - not created.results[0].node.isDisabled
+          - created.results[1].node.isDisabled
+          - created.results[0].node.countryCode == 'NL'
+          - fleet_order == ['fleet-ams', 'fleet-fra', 'fleet-waw']
+        fail_msg: "unexpected creation: {{ created.results }}"
+
+    - name: Each listing was read once, the new disabled node disabled in bulk
+      ansible.builtin.assert:
+        that:
+          - delta | int == expected
+        fail_msg: "{{ request }}: expected {{ expected }} requests, got {{ delta }}"
+      loop:
+        # Once to plan, once to report the nodes as written.
+        - [GET /api/nodes, 2]
+        - [GET /api/config-profiles, 1]
+        - [POST /api/nodes, 3]
+        - [POST /api/nodes/bulk-actions, 1]
+        # Whether a reorder follows depends on the order the concurrent
+        # creations happened to land in; the order itself is asserted above.
+      vars:
+        request: "{{ item[0] }}"
+        expected: "{{ item[1] }}"
+
+    # --- idempotency -----------------------------------------------------------
+
+    - name: Requests before the converged run
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_before
+
+    - name: Apply the same batch again
+      kenyawest.remnawave.nodes:
+        nodes: "{{ fleet }}"
+      register: again
+
+    - name: Requests after the converged run
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: The converged batch is a no-op that reads the nodes once
+      ansible.builtin.assert:
+        that:
+          - again is not changed
+          - again.results | map(attribute='action') | list == ['none'] * 3
+          - counts_after.json | dict2items | rejectattr('key', 'match', 'GET ')
+            | map(attribute='value') | sum
+            == counts_before.json | dict2items | rejectattr('key', 'match', 'GET ')
+               | map(attribute='value') | sum
+          - (counts_after.json['GET /api/nodes'] - counts_before.json['GET /api/nodes']) == 1
+        fail_msg: "converged batch changed something: {{ again.results }}"
+
+    # --- one change shared by many nodes -------------------------------------------
+
+    - name: Requests before the shared change
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_before
+
+    - name: Tag every node the same way
+      kenyawest.remnawave.nodes:
+        nodes: &tagged
+          - name: fleet-ams
+            tags: [FLEET]
+          - name: fleet-fra
+            tags: [FLEET]
+          - name: fleet-waw
+            tags: [FLEET]
+      register: tagged
+
+    - name: Requests after the shared change
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: Nodes given the same change shared one request
+      ansible.builtin.assert:
+        that:
+          - tagged is changed
+          - tagged.results | map(attribute='action') | list == ['update'] * 3
+          - tagged.results | map(attribute='node.tags') | list == [['FLEET']] * 3
+          - (counts_after.json['POST /api/nodes/bulk-actions/update'] | default(0))
+            - (counts_before.json['POST /api/nodes/bulk-actions/update'] | default(0)) == 1
+          - (counts_after.json['PATCH /api/nodes'] | default(0))
+            == (counts_before.json['PATCH /api/nodes'] | default(0))
+        fail_msg: "unexpected shared change: {{ tagged.results }}"
+
+    - name: Apply the shared change again
+      kenyawest.remnawave.nodes:
+        nodes: *tagged
+      register: tagged_again
+
+    - name: The shared change is idempotent
+      ansible.builtin.assert:
+        that:
+          - tagged_again is not changed
+
+    # --- a mix of changes, with linked hosts ----------------------------------------
+
+    - name: Bind a host to fleet-waw
+      kenyawest.remnawave.host:
+        remark: fleet-waw-host
+        address: waw.fleet.example.com
+        inbound: fleet-inbound
+        port: 443
+        nodes: [fleet-waw]
+
+    - name: Requests before the mixed batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_before
+
+    - name: Disable, enable, update and delete in one task
+      kenyawest.remnawave.nodes:
+        nodes: &mixed
+          - name: fleet-ams
+            state: disabled
+            port: 3333
+          - name: fleet-fra
+            state: enabled
+          - name: fleet-waw
+            state: absent
+            linked_hosts: disable
+          - name: fleet-nowhere
+            state: absent
+      diff: true
+      register: mixed
+
+    - name: Requests after the mixed batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: Read hosts after the mixed batch
+      kenyawest.remnawave.host_info:
+        remark: fleet-waw-host
+      register: waw_host
+
+    - name: Read nodes after the mixed batch
+      kenyawest.remnawave.node_info:
+      register: listed
+
+    - name: Each entry got exactly its own change
+      ansible.builtin.assert:
+        that:
+          - mixed is changed
+          - mixed.results | map(attribute='action') | list
+            == ['update', 'update', 'delete', 'none']
+          - mixed.results | map(attribute='changed') | list == [true, true, true, false]
+          - mixed.results[2].linked_hosts == ['fleet-waw-host']
+          - mixed.results[0].node.isDisabled
+          - mixed.results[0].node.port == 3333
+          - not mixed.results[1].node.isDisabled
+          - waw_host.hosts[0].isDisabled
+          - fleet_order == ['fleet-ams', 'fleet-fra']
+          - mixed.diff[2].after.linkedHosts['fleet-waw-host'] == 'disabled'
+        fail_msg: "unexpected mixed batch: {{ mixed.results }}"
+
+    - name: Enabling and disabling went in bulk, the rest one per node
+      ansible.builtin.assert:
+        that:
+          - delta | int == expected
+        fail_msg: "{{ request }}: expected {{ expected }} requests, got {{ delta }}"
+      loop:
+        - [POST /api/hosts/bulk/disable, 1]
+        - [POST /api/nodes/bulk-actions, 2]
+        - [PATCH /api/nodes, 1]
+      vars:
+        request: "{{ item[0] }}"
+        expected: "{{ item[1] }}"
+
+    - name: Apply the mixed batch again
+      kenyawest.remnawave.nodes:
+        nodes: *mixed
+      register: mixed_again
+
+    - name: The mixed batch is idempotent
+      ansible.builtin.assert:
+        that:
+          - mixed_again is not changed
+
+    # --- list order --------------------------------------------------------------
+
+    - name: Add a node by hand
+      kenyawest.remnawave.node:
+        name: fleet-manual
+        address: 203.0.113.69
+        inbounds: [fleet-inbound]
+
+    - name: Read nodes before reordering
+      kenyawest.remnawave.node_info:
+      register: listed
+
+    - name: Put the hand-made node between fleet-ams and fleet-fra
+      kenyawest.remnawave.api:
+        method: POST
+        path: /api/nodes/actions/reorder
+        body:
+          nodes:
+            - uuid: "{{ (listed.nodes | selectattr('name', 'eq', 'fleet-manual') | first).uuid }}"
+              viewPosition: "{{ ams.viewPosition + 1 }}"
+            - uuid: "{{ (listed.nodes | selectattr('name', 'eq', 'fleet-fra') | first).uuid }}"
+              viewPosition: "{{ ams.viewPosition + 2 }}"
+      vars:
+        ams: "{{ listed.nodes | selectattr('name', 'eq', 'fleet-ams') | first }}"
+
+    - name: List the nodes the other way round
+      kenyawest.remnawave.nodes:
+        nodes: &reversed
+          - name: fleet-fra
+          - name: fleet-ams
+      diff: true
+      register: reversed
+
+    - name: Read nodes after reversing the batch
+      kenyawest.remnawave.node_info:
+      register: listed
+
+    - name: The listed nodes traded places around the hand-made one
+      ansible.builtin.assert:
+        that:
+          - reversed is changed
+          - reversed.results | map(attribute='action') | list == ['update'] * 2
+          - reversed.diff[0].after.viewPosition is defined
+          - reversed.results[0].node.viewPosition < reversed.results[1].node.viewPosition
+          - fleet_order == ['fleet-fra', 'fleet-manual', 'fleet-ams']
+        fail_msg: "{{ fleet_order }}; {{ reversed.results }}"
+
+    - name: List the nodes the other way round again
+      kenyawest.remnawave.nodes:
+        nodes: *reversed
+      register: reversed_again
+
+    - name: Leave the order alone
+      kenyawest.remnawave.nodes:
+        ordered: false
+        nodes:
+          - name: fleet-ams
+          - name: fleet-fra
+      register: unordered
+
+    - name: Read nodes after the unordered batch
+      kenyawest.remnawave.node_info:
+      register: listed
+
+    - name: Nodes in list order stay put, and without ordered nothing moves
+      ansible.builtin.assert:
+        that:
+          - reversed_again is not changed
+          - unordered is not changed
+          - fleet_order == ['fleet-fra', 'fleet-manual', 'fleet-ams']
+
+    # --- bad entries change nothing ----------------------------------------------
+
+    - name: Declare one node twice
+      kenyawest.remnawave.nodes:
+        nodes:
+          - name: fleet-ams
+            port: 4444
+          - name: fleet-ams
+            state: enabled
+      register: twice
+      ignore_errors: true
+
+    - name: Follow a good entry with one that cannot be created
+      kenyawest.remnawave.nodes:
+        nodes:
+          - name: fleet-ams
+            port: 4444
+          - name: fleet-new
+            port: 2222
+      register: incomplete
+      ignore_errors: true
+
+    - name: Read nodes after the refused batches
+      kenyawest.remnawave.node_info:
+      register: listed
+
+    - name: Every bad batch failed over its entry and changed nothing
+      ansible.builtin.assert:
+        that:
+          - twice is failed
+          - "'declare each node once' in twice.msg"
+          - incomplete is failed
+          - "\"nodes[1] ('fleet-new')\" in incomplete.msg"
+          - "'requires: address, inbounds' in incomplete.msg"
+          - "'Nothing was changed' in incomplete.msg"
+          - (listed.nodes | selectattr('name', 'eq', 'fleet-ams') | first).port == 3333
+          - listed.nodes | selectattr('name', 'eq', 'fleet-new') | list == []
+        fail_msg: "twice: {{ twice.msg | default('') }}; incomplete: {{ incomplete.msg | default('') }}"
+
+    # --- clean up ------------------------------------------------------------------
+
+    - name: Remove the fleet and the host
+      kenyawest.remnawave.nodes:
+        nodes:
+          - {name: fleet-ams, state: absent}
+          - {name: fleet-fra, state: absent}
+          - {name: fleet-manual, state: absent, linked_hosts: delete}
+
+    - name: Remove the host bound to the deleted node
+      kenyawest.remnawave.host:
+        remark: fleet-waw-host
+        state: absent

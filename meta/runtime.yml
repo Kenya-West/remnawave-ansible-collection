@@ -15,6 +15,7 @@ action_groups:
     - internal_squad_info
     - node
     - node_info
+    - nodes
     - snippet
     - snippet_info
     - subscription_settings

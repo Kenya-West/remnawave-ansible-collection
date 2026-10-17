@@ -2,10 +2,12 @@
 # Exercises managing many hosts in one task with kenyawest.remnawave.hosts.
 #
 # Covers: check mode predicting a batch without applying it, creation, the
-# number of requests a batch makes (each listing read once, one write per
-# changed host), idempotency, a mix of updates, deletions and no-ops in one
-# task, and that a bad entry - a host declared twice, a creation missing
-# its inbound, an unknown node - fails the task without changing anything.
+# number of requests a batch makes (each listing read once, one creation per
+# new host, one bulk deletion, one bulk update per distinct change),
+# idempotency, a mix of updates, deletions and no-ops in one task, putting
+# the listed hosts in list order around a hand-made one, and that a bad entry
+# - a host declared twice, a creation missing its inbound, an unknown node -
+# fails the task without changing anything.
 - name: Hosts managed in one task
   hosts: localhost
   connection: local
@@ -133,6 +135,21 @@
           - created.results[3].identifier == 'par.batch.example.com'
         fail_msg: "unexpected creation: {{ created.results }}"
 
+    - name: Read hosts after creation
+      kenyawest.remnawave.host_info:
+      register: after_created
+
+    - name: Hosts created at once still stand in list order
+      ansible.builtin.assert:
+        that:
+          - after_created.hosts | selectattr('address', 'search', 'batch.example.com')
+            | map(attribute='remark') | list
+            == ['batch-ams', 'batch-fra', 'batch-waw', 'par.batch.example.com']
+          - created.results | map(attribute='host.viewPosition') | list
+            == after_created.hosts | selectattr('address', 'search', 'batch.example.com')
+               | map(attribute='viewPosition') | list
+        fail_msg: "unexpected order: {{ after_created.hosts | map(attribute='remark') | list }}"
+
     - name: Each listing was read once, and each host written once
       ansible.builtin.assert:
         that:
@@ -176,9 +193,17 @@
             == (counts_before.json['POST /api/hosts'] | default(0))
           - (counts_after.json['PATCH /api/hosts'] | default(0))
             == (counts_before.json['PATCH /api/hosts'] | default(0))
+          - (counts_after.json['POST /api/hosts/actions/reorder'] | default(0))
+            == (counts_before.json['POST /api/hosts/actions/reorder'] | default(0))
         fail_msg: "converged batch changed something: {{ again.results }}"
 
     # --- a mix of changes in one task --------------------------------------------
+
+    - name: Requests before the mixed batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_before
 
     - name: Update, enable, delete and leave alone in one task
       kenyawest.remnawave.hosts:
@@ -194,6 +219,25 @@
           - remark: batch-nowhere
             state: absent
       register: mixed
+
+    - name: Requests after the mixed batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: Distinct updates went one per host, the deletion in bulk
+      ansible.builtin.assert:
+        that:
+          - delta | int == expected
+        fail_msg: "{{ request }}: expected {{ expected }} requests, got {{ delta }}"
+      loop:
+        - [PATCH /api/hosts, 2]
+        - [PATCH /api/hosts/bulk/update, 0]
+        - [POST /api/hosts/bulk/delete, 1]
+      vars:
+        request: "{{ item[0] }}"
+        expected: "{{ item[1] }}"
 
     - name: Read hosts after the mixed batch
       kenyawest.remnawave.host_info:
@@ -221,6 +265,167 @@
       ansible.builtin.assert:
         that:
           - mixed_again is not changed
+
+    # --- one change shared by many hosts ------------------------------------------
+
+    - name: Requests before the shared change
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_before
+
+    - name: Tag every host the same way, one at a time on the wire
+      kenyawest.remnawave.hosts:
+        parallelism: 1
+        hosts: &tagged
+          - remark: batch-ams
+            tags: [BATCH]
+          - remark: batch-fra
+            tags: [BATCH]
+          - remark: batch-waw
+            tags: [BATCH]
+            hidden: true
+      register: tagged
+
+    - name: Requests after the shared change
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: Read hosts after the shared change
+      kenyawest.remnawave.host_info:
+      register: after_tagged
+
+    - name: Hosts given the same change shared one request
+      ansible.builtin.assert:
+        that:
+          - tagged is changed
+          - tagged.results | map(attribute='action') | list == ['update'] * 3
+          - tagged.results[0].host.tags == ['BATCH']
+          - tagged.results[0].host.port == 8443
+          - tagged.results[2].host.isHidden
+          - (counts_after.json['PATCH /api/hosts/bulk/update'] | default(0))
+            - (counts_before.json['PATCH /api/hosts/bulk/update'] | default(0)) == 1
+          - (counts_after.json['PATCH /api/hosts'] | default(0))
+            - (counts_before.json['PATCH /api/hosts'] | default(0)) == 1
+          - after_tagged.hosts | selectattr('remark', 'match', 'batch-')
+            | map(attribute='tags') | list == [['BATCH']] * 3
+        fail_msg: "unexpected shared change: {{ tagged.results }}"
+
+    - name: Apply the shared change again
+      kenyawest.remnawave.hosts:
+        hosts: *tagged
+      register: tagged_again
+
+    - name: The shared change is idempotent
+      ansible.builtin.assert:
+        that:
+          - tagged_again is not changed
+
+    # --- list order --------------------------------------------------------------
+
+    - name: Add a host by hand between the batch's hosts
+      kenyawest.remnawave.host:
+        remark: batch-manual
+        address: manual.batch.example.com
+        inbound: batch-inbound
+        port: 443
+
+    - name: Read hosts before reordering
+      kenyawest.remnawave.host_info:
+      register: order_seed
+
+    - name: Put the hand-made host between batch-ams and batch-fra
+      kenyawest.remnawave.api:
+        method: POST
+        path: /api/hosts/actions/reorder
+        body:
+          hosts:
+            - uuid: "{{ (order_seed.hosts | selectattr('remark', 'eq', 'batch-manual') | first).uuid }}"
+              viewPosition: "{{ (order_seed.hosts | selectattr('remark', 'eq', 'batch-ams') | first).viewPosition + 1 }}"
+            - uuid: "{{ (order_seed.hosts | selectattr('remark', 'eq', 'batch-fra') | first).uuid }}"
+              viewPosition: "{{ (order_seed.hosts | selectattr('remark', 'eq', 'batch-ams') | first).viewPosition + 2 }}"
+            - uuid: "{{ (order_seed.hosts | selectattr('remark', 'eq', 'batch-waw') | first).uuid }}"
+              viewPosition: "{{ (order_seed.hosts | selectattr('remark', 'eq', 'batch-ams') | first).viewPosition + 3 }}"
+
+    - name: Requests before reversing the batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_before
+
+    - name: List the batch's hosts the other way round
+      kenyawest.remnawave.hosts:
+        hosts: &reversed
+          - remark: batch-waw
+          - remark: batch-fra
+            port: 8443
+          - remark: batch-ams
+      diff: true
+      register: reversed
+
+    - name: Requests after reversing the batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: Read hosts after reversing the batch
+      kenyawest.remnawave.host_info:
+      register: after_reversed
+
+    - name: The batch's hosts traded places around the hand-made one, in one request
+      ansible.builtin.assert:
+        that:
+          - reversed is changed
+          - reversed.results | map(attribute='action') | list == ['update'] * 3
+          - reversed.results[0].host.viewPosition < reversed.results[2].host.viewPosition
+          - reversed.diff[0].after.viewPosition is defined
+          - reversed.diff[1].after.port == 8443
+          - after_reversed.hosts | selectattr('remark', 'match', 'batch-(ams|fra|waw|manual)')
+            | map(attribute='remark') | list
+            == ['batch-waw', 'batch-manual', 'batch-fra', 'batch-ams']
+          - (counts_after.json['POST /api/hosts/actions/reorder'] | default(0))
+            - (counts_before.json['POST /api/hosts/actions/reorder'] | default(0)) == 1
+        fail_msg: >-
+          {{ after_reversed.hosts | map(attribute='remark') | list }}; {{ reversed.results }}
+
+    - name: List the batch's hosts the other way round again
+      kenyawest.remnawave.hosts:
+        hosts: *reversed
+      register: reversed_again
+
+    - name: Hosts in list order stay put
+      ansible.builtin.assert:
+        that:
+          - reversed_again is not changed
+
+    - name: List them in the original order, but leave the panel's order alone
+      kenyawest.remnawave.hosts:
+        ordered: false
+        hosts:
+          - remark: batch-ams
+          - remark: batch-fra
+          - remark: batch-waw
+      register: unordered
+
+    - name: Read hosts after the unordered batch
+      kenyawest.remnawave.host_info:
+      register: after_unordered
+
+    - name: Without ordered, the order is not touched
+      ansible.builtin.assert:
+        that:
+          - unordered is not changed
+          - after_unordered.hosts | selectattr('remark', 'match', 'batch-(ams|fra|waw|manual)')
+            | map(attribute='remark') | list
+            == ['batch-waw', 'batch-manual', 'batch-fra', 'batch-ams']
+
+    - name: Remove the hand-made host
+      kenyawest.remnawave.host:
+        remark: batch-manual
+        state: absent
 
     - name: An empty batch manages nothing
       kenyawest.remnawave.hosts:

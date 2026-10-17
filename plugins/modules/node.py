@@ -195,193 +195,23 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import 
     RemnawaveApiError, RemnawaveClient,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
-    STATE_CHOICES, FieldSpec, build_patch, desired_enabled, exit_with_change,
-    parse_traffic_limit, remnawave_argument_spec, resolve_for_check_mode,
-    validate_tags,
+    remnawave_argument_spec,
 )
-from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
-    bulk_host_action, find_node, hosts_linked_to_node, resolve_inbound_uuids,
+from ansible_collections.kenyawest.remnawave.plugins.module_utils.node import (
+    apply_node_plan, node_listings, node_options, plan_node,
 )
-
-
-def current_config_profile(value):
-    value = value or {}
-    return {
-        'activeConfigProfileUuid': value.get('activeConfigProfileUuid'),
-        'activeInbounds': sorted(
-            i.get('uuid') for i in (value.get('activeInbounds') or [])),
-    }
-
-
-def build_fields(module, client):
-    params = module.params
-    fields = [
-        FieldSpec('address', 'address'),
-        FieldSpec('port', 'port'),
-        FieldSpec('traffic_tracking', 'isTrafficTrackingActive'),
-        FieldSpec('traffic_limit', 'trafficLimitBytes',
-                  to_api=parse_traffic_limit),
-        FieldSpec('notify_percent', 'notifyPercent'),
-        FieldSpec('traffic_reset_day', 'trafficResetDay'),
-        FieldSpec('country_code', 'countryCode', to_api=lambda v: v.upper()),
-        FieldSpec('consumption_multiplier', 'consumptionMultiplier'),
-        FieldSpec('tags', 'tags', kind='set', to_api=validate_tags),
-        FieldSpec('note', 'note', to_api=lambda v: v or None),
-    ]
-    resolved = dict(params)
-    if params['config_profile'] is not None or params['inbounds'] is not None:
-        # The inbounds alone suffice: their tags are unique across profiles,
-        # so they name their profile too.
-        if params['inbounds'] is None:
-            module.fail_json(msg='config_profile requires inbounds')
-        profile_uuid, inbound_uuids = resolve_for_check_mode(
-            module,
-            lambda: resolve_inbound_uuids(
-                client, params['config_profile'], params['inbounds']),
-            (params['config_profile'], list(params['inbounds'])))
-        resolved['config_profile'] = {
-            'activeConfigProfileUuid': profile_uuid,
-            'activeInbounds': sorted(inbound_uuids),
-        }
-        fields.append(FieldSpec(
-            'config_profile', 'configProfile', kind='json',
-            from_api=current_config_profile))
-    return fields, resolved
-
-
-def apply_enabled(module, client, current, wanted):
-    """Reconcile the enable/disable action; returns True when it changed."""
-    if wanted is None or current is None:
-        return False
-    currently_enabled = not current.get('isDisabled', False)
-    if currently_enabled == wanted:
-        return False
-    if not module.check_mode:
-        action = 'enable' if wanted else 'disable'
-        client.post('/api/nodes/%s/actions/%s' % (current['uuid'], action))
-    return True
-
-
-def cascade_hosts(module, client, node, before, after):
-    """Apply the linked_hosts action; returns the affected host remarks."""
-    action = module.params['linked_hosts']
-    if action == 'ignore' or node is None:
-        return []
-
-    linked = hosts_linked_to_node(client, node['uuid'])
-    if action == 'delete':
-        targets = linked
-    else:
-        wanted_disabled = (action == 'disable')
-        targets = [h for h in linked
-                   if bool(h.get('isDisabled', False)) != wanted_disabled]
-    if not targets:
-        return []
-
-    remarks = sorted(h.get('remark') for h in targets)
-    before['linkedHosts'] = dict(
-        (h.get('remark'), 'disabled' if h.get('isDisabled') else 'enabled')
-        for h in targets)
-    after['linkedHosts'] = dict(
-        (h.get('remark'), 'absent' if action == 'delete' else '%sd' % action)
-        for h in targets)
-
-    if not module.check_mode:
-        bulk_host_action(client, action, [h['uuid'] for h in targets])
-    return remarks
-
-
-def run(module, client):
-    params = module.params
-    name = params['name']
-    state = params['state']
-    current = find_node(client, name)
-    before, after = {}, {}
-
-    if state == 'absent':
-        if current is None:
-            # Without the node there is no binding left to resolve, so any
-            # cascade would have to guess which hosts were linked.
-            module.exit_json(changed=False, linked_hosts=[])
-        # Hosts first: after the node is gone the binding cannot be resolved.
-        remarks = cascade_hosts(module, client, current, before, after)
-        if not module.check_mode:
-            client.delete('/api/nodes/%s' % current['uuid'])
-        before['name'] = name
-        exit_with_change(module, before, after, linked_hosts=remarks)
-
-    wanted_enabled = desired_enabled(state)
-    fields, resolved = build_fields(module, client)
-    patch, patch_before, patch_after = build_patch(resolved, current, fields)
-    before.update(patch_before)
-    after.update(patch_after)
-
-    if current is None:
-        missing = [opt for opt in ('address', 'inbounds')
-                   if params[opt] is None]
-        if missing:
-            module.fail_json(
-                msg='Creating node %r requires: %s' % (name, ', '.join(missing)))
-        payload = dict(patch)
-        payload['name'] = name
-        after['name'] = name
-        if wanted_enabled is False:
-            after['isDisabled'] = True
-        if module.check_mode:
-            exit_with_change(module, before, after, node=payload, linked_hosts=[])
-        created = client.post('/api/nodes', payload)
-        # Nodes are created enabled; honour state=disabled immediately.
-        if wanted_enabled is False:
-            client.post('/api/nodes/%s/actions/disable' % created['uuid'])
-            created = find_node(client, name, required=True)
-        # A brand new node cannot have hosts bound to it yet.
-        exit_with_change(module, before, after, node=created, linked_hosts=[])
-
-    enabled_changed = apply_enabled(module, client, current, wanted_enabled)
-    if enabled_changed:
-        before['isDisabled'] = current.get('isDisabled')
-        after['isDisabled'] = not wanted_enabled
-
-    if patch:
-        payload = dict(patch)
-        payload['uuid'] = current['uuid']
-        if not module.check_mode:
-            client.patch('/api/nodes', payload)
-
-    remarks = cascade_hosts(module, client, current, before, after)
-
-    if not patch and not enabled_changed and not remarks:
-        module.exit_json(changed=False, node=current, linked_hosts=[])
-
-    node = current if module.check_mode else find_node(client, name, required=True)
-    exit_with_change(module, before, after, node=node, linked_hosts=remarks)
 
 
 def main():
     argument_spec = remnawave_argument_spec()
-    argument_spec.update(
-        name=dict(type='str', required=True),
-        state=dict(type='str', choices=STATE_CHOICES, default='present'),
-        linked_hosts=dict(type='str', default='ignore',
-                          choices=['ignore', 'enable', 'disable', 'delete']),
-        address=dict(type='str'),
-        port=dict(type='int'),
-        config_profile=dict(type='str'),
-        inbounds=dict(type='list', elements='str'),
-        traffic_tracking=dict(type='bool'),
-        traffic_limit=dict(type='raw'),
-        notify_percent=dict(type='int'),
-        traffic_reset_day=dict(type='int'),
-        country_code=dict(type='str'),
-        consumption_multiplier=dict(type='float'),
-        tags=dict(type='list', elements='str'),
-        note=dict(type='str'),
-    )
+    argument_spec.update(node_options())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     client = RemnawaveClient(module)
     try:
-        run(module, client)
+        client.prefetch(node_listings([module.params]))
+        plan = plan_node(module, client, module.params)
+        module.exit_json(**apply_node_plan(module, client, plan))
     except RemnawaveApiError as exc:
         module.fail_json(msg=str(exc), status=exc.status, error_code=exc.error_code)
     except ValueError as exc:

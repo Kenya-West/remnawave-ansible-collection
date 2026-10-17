@@ -60,4 +60,7 @@ notes:
   - All modules support check mode and diff mode unless stated otherwise.
   - Connection options can be set once for all modules of this collection via
     C(module_defaults) with the group C(group/kenyawest.remnawave.remnawave).
+  - Run with C(-vvv), every module also returns C(api_trace), the requests it
+    made to the panel with their HTTP status and duration in seconds, and
+    C(api_seconds), the total time spent in them.
 '''

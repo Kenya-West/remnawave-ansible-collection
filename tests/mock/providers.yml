@@ -1,0 +1,379 @@
+---
+# Exercises infra billing providers and linking nodes to them.
+#
+# Covers: check mode predicting a batch of providers without applying it,
+# creating them concurrently with as few requests as it takes, idempotency,
+# updating and clearing links, linking nodes by provider name (several nodes
+# in one bulk request) and unlinking them, check mode tolerating a provider
+# that does not exist yet, a provider deletion predicting the nodes and
+# billing history it takes along, and that bad entries change nothing.
+- name: Infra providers and their nodes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "{{ panel }}"
+      token: test-token
+      api_key: sekret
+  vars:
+    panel: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+    providers:
+      - name: Hetzner
+        login_url: https://console.hetzner.cloud
+        favicon_link: https://www.hetzner.com/favicon.ico
+      - name: OVHcloud
+        login_url: https://www.ovh.com/manager
+      - name: Vultr
+    delta: >-
+      {{ (counts_after.json[request] | default(0))
+         - (counts_before.json[request] | default(0)) }}
+    node_provider: >-
+      {{ listed_nodes.nodes | selectattr('name', 'match', 'billed-')
+         | items2dict(key_name='name', value_name='providerUuid') }}
+    provider_uuids: >-
+      {{ listed.providers | items2dict(key_name='name', value_name='uuid') }}
+  tasks:
+    - name: Set up config profile
+      kenyawest.remnawave.config_profile:
+        name: billed-profile
+        config:
+          inbounds:
+            - tag: billed-inbound
+              protocol: vless
+              port: 443
+
+    # --- check mode ----------------------------------------------------------
+
+    - name: Predict the providers in check mode
+      kenyawest.remnawave.infra_providers:
+        providers: "{{ providers }}"
+      check_mode: true
+      diff: true
+      register: dry
+
+    - name: Predict a node linked to a provider that does not exist yet
+      kenyawest.remnawave.node:
+        name: billed-ams
+        address: 203.0.113.81
+        inbounds: [billed-inbound]
+        provider: Hetzner
+      check_mode: true
+      register: dry_node
+
+    - name: Read providers after the dry run
+      kenyawest.remnawave.infra_provider_info:
+      register: listed
+
+    - name: Check mode predicted the creations and applied none
+      ansible.builtin.assert:
+        that:
+          - dry is changed
+          - dry.results | map(attribute='action') | list == ['create'] * 3
+          - dry.diff | length == 3
+          - dry.diff[0].after.loginUrl == 'https://console.hetzner.cloud'
+          - dry_node is changed
+          - dry_node.node.providerUuid == 'Hetzner'
+          - listed.providers | selectattr('name', 'in', providers | map(attribute='name'))
+            | list == []
+        fail_msg: "unexpected dry run: {{ dry }}"
+
+    # --- creation, and how many requests it takes ----------------------------
+
+    - name: Requests before the batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: &test_headers
+          Authorization: Bearer test-token
+          X-Api-Key: sekret
+      register: counts_before
+
+    - name: Create the providers
+      kenyawest.remnawave.infra_providers:
+        providers: "{{ providers }}"
+      register: created
+
+    - name: Requests after the batch
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: Every provider was created as declared
+      ansible.builtin.assert:
+        that:
+          - created is changed
+          - created.results | map(attribute='action') | list == ['create'] * 3
+          - created.results | map(attribute='name') | list == ['Hetzner', 'OVHcloud', 'Vultr']
+          - created.results[0].provider.faviconLink == 'https://www.hetzner.com/favicon.ico'
+          - created.results[2].provider.loginUrl is none
+          - created.results[0].provider.billingHistory.totalBills == 0
+        fail_msg: "unexpected creation: {{ created.results }}"
+
+    - name: The listing was read to plan and to report, each provider created once
+      ansible.builtin.assert:
+        that:
+          - delta | int == expected
+        fail_msg: "{{ request }}: expected {{ expected }} requests, got {{ delta }}"
+      loop:
+        - [GET /api/infra-billing/providers, 2]
+        - [POST /api/infra-billing/providers, 3]
+      vars:
+        request: "{{ item[0] }}"
+        expected: "{{ item[1] }}"
+
+    - name: Apply the same providers again
+      kenyawest.remnawave.infra_providers:
+        providers: "{{ providers }}"
+      register: again
+
+    - name: Apply one provider again on its own
+      kenyawest.remnawave.infra_provider:
+        name: Hetzner
+        login_url: https://console.hetzner.cloud
+      register: again_one
+
+    - name: Converged providers are a no-op
+      ansible.builtin.assert:
+        that:
+          - again is not changed
+          - again.results | map(attribute='action') | list == ['none'] * 3
+          - again_one is not changed
+
+    # --- updating ------------------------------------------------------------
+
+    - name: Change a login URL and clear a favicon
+      kenyawest.remnawave.infra_provider:
+        name: Hetzner
+        login_url: https://accounts.hetzner.com
+        favicon_link: ""
+      diff: true
+      register: updated
+
+    - name: Change them the same way again
+      kenyawest.remnawave.infra_provider:
+        name: Hetzner
+        login_url: https://accounts.hetzner.com
+        favicon_link: ""
+      register: updated_again
+
+    - name: Only the given links changed, and the update is idempotent
+      ansible.builtin.assert:
+        that:
+          - updated is changed
+          - updated.provider.loginUrl == 'https://accounts.hetzner.com'
+          - updated.provider.faviconLink is none
+          - updated.diff.before.faviconLink == 'https://www.hetzner.com/favicon.ico'
+          - "updated.diff.after == {'loginUrl': 'https://accounts.hetzner.com', 'faviconLink': none}"
+          - updated_again is not changed
+
+    # --- linking nodes ---------------------------------------------------------
+
+    - name: Create a node at a provider
+      kenyawest.remnawave.node:
+        name: billed-ams
+        address: 203.0.113.81
+        inbounds: [billed-inbound]
+        provider: Hetzner
+      register: linked
+
+    - name: Read providers
+      kenyawest.remnawave.infra_provider_info:
+      register: listed
+
+    - name: The node was created linked to the provider
+      ansible.builtin.assert:
+        that:
+          - linked is changed
+          - linked.node.providerUuid == provider_uuids['Hetzner']
+
+    - name: Create two more nodes
+      kenyawest.remnawave.nodes:
+        nodes:
+          - {name: billed-fra, address: 203.0.113.82, inbounds: [billed-inbound]}
+          - {name: billed-waw, address: 203.0.113.83, inbounds: [billed-inbound]}
+
+    - name: Requests before linking in bulk
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_before
+
+    - name: Move every node to one provider
+      kenyawest.remnawave.nodes:
+        nodes: &moved
+          - {name: billed-ams, provider: OVHcloud}
+          - {name: billed-fra, provider: OVHcloud}
+          - {name: billed-waw, provider: "{{ provider_uuids['OVHcloud'] }}"}
+      diff: true
+      register: moved
+
+    - name: Requests after linking in bulk
+      ansible.builtin.uri:
+        url: "{{ panel }}/api/_test/requests"
+        headers: *test_headers
+      register: counts_after
+
+    - name: Read nodes after moving them
+      kenyawest.remnawave.node_info:
+      register: listed_nodes
+
+    - name: The nodes moved together in one request
+      ansible.builtin.assert:
+        that:
+          - moved is changed
+          - moved.results | map(attribute='action') | list == ['update'] * 3
+          - node_provider.values() | unique | list == [provider_uuids['OVHcloud']]
+          - moved.diff[0].before.providerUuid == provider_uuids['Hetzner']
+          - moved.diff[1].before.providerUuid is none
+          - (counts_after.json['POST /api/nodes/bulk-actions/update'] | default(0))
+            - (counts_before.json['POST /api/nodes/bulk-actions/update'] | default(0)) == 1
+          - (counts_after.json['PATCH /api/nodes'] | default(0))
+            == (counts_before.json['PATCH /api/nodes'] | default(0))
+          - (counts_after.json['GET /api/infra-billing/providers'] | default(0))
+            - (counts_before.json['GET /api/infra-billing/providers'] | default(0)) == 1
+        fail_msg: "unexpected move: {{ moved.results }}"
+
+    - name: Move them again
+      kenyawest.remnawave.nodes:
+        nodes: *moved
+      register: moved_again
+
+    - name: Unlink one node
+      kenyawest.remnawave.node:
+        name: billed-waw
+        provider: ""
+      register: unlinked
+
+    - name: Unlink it again
+      kenyawest.remnawave.node:
+        name: billed-waw
+        provider: ""
+      register: unlinked_again
+
+    - name: Read the providers' nodes
+      kenyawest.remnawave.infra_provider_info:
+        name: OVHcloud
+      register: ovh
+
+    - name: Linking is idempotent, and an empty provider unlinks
+      ansible.builtin.assert:
+        that:
+          - moved_again is not changed
+          - unlinked is changed
+          - unlinked.node.providerUuid is none
+          - unlinked_again is not changed
+          - ovh.providers | length == 1
+          - "ovh.nodes == {'OVHcloud': ['billed-ams', 'billed-fra']}"
+
+    - name: Link a node to an unknown provider
+      kenyawest.remnawave.node:
+        name: billed-waw
+        provider: Nowhere
+      register: unknown
+      ignore_errors: true
+
+    - name: An unknown provider fails a real run
+      ansible.builtin.assert:
+        that:
+          - unknown is failed
+          - "\"Infra provider 'Nowhere' not found\" in unknown.msg"
+          - "'OVHcloud' in unknown.msg"
+
+    # --- deleting a provider -----------------------------------------------------
+
+    - name: Bill the provider once
+      kenyawest.remnawave.api:
+        method: POST
+        path: /api/infra-billing/history
+        body:
+          providerUuid: "{{ provider_uuids['OVHcloud'] }}"
+          amount: 12.5
+          billedAt: "2026-10-01T00:00:00.000Z"
+
+    - name: Predict deleting the provider
+      kenyawest.remnawave.infra_providers:
+        providers:
+          - {name: OVHcloud, state: absent}
+          - {name: Never-Existed, state: absent}
+      check_mode: true
+      diff: true
+      register: dry_delete
+
+    - name: Delete the provider
+      kenyawest.remnawave.infra_providers:
+        providers:
+          - {name: OVHcloud, state: absent}
+          - {name: Never-Existed, state: absent}
+      register: deleted
+
+    - name: Read nodes after the deletion
+      kenyawest.remnawave.node_info:
+      register: listed_nodes
+
+    - name: The deletion showed what it takes along, and the nodes lost the provider
+      ansible.builtin.assert:
+        that:
+          - dry_delete is changed
+          - dry_delete.diff | length == 1
+          - dry_delete.diff[0].before.nodes == ['billed-ams', 'billed-fra']
+          - dry_delete.diff[0].before.billingHistory.totalBills == 1
+          - deleted is changed
+          - deleted.results | map(attribute='action') | list == ['delete', 'none']
+          - deleted.results[0].provider is not defined
+          - node_provider.values() | unique | list == [none]
+        fail_msg: "{{ dry_delete | to_json }}"
+
+    # --- bad entries change nothing ----------------------------------------------
+
+    - name: Declare one provider twice, once by UUID
+      kenyawest.remnawave.infra_providers:
+        providers:
+          - {name: Hetzner, login_url: https://example.com}
+          - {name: "{{ provider_uuids['Hetzner'] }}", state: absent}
+      register: twice
+      ignore_errors: true
+
+    - name: Follow a good entry with a name the panel would refuse
+      kenyawest.remnawave.infra_providers:
+        providers:
+          - {name: Hetzner, login_url: https://example.com}
+          - {name: X}
+      register: short
+      ignore_errors: true
+
+    - name: Read providers after the refused batches
+      kenyawest.remnawave.infra_provider_info:
+        name: Hetzner
+      register: hetzner
+
+    - name: Every bad batch failed over its entry and changed nothing
+      ansible.builtin.assert:
+        that:
+          - twice is failed
+          - "'declare each provider once' in twice.msg"
+          - short is failed
+          - "\"providers[1] ('X')\" in short.msg"
+          - "'Nothing was changed' in short.msg"
+          - hetzner.providers[0].loginUrl == 'https://accounts.hetzner.com'
+        fail_msg: "twice: {{ twice.msg | default('') }}; short: {{ short.msg | default('') }}"
+
+    # --- clean up ------------------------------------------------------------------
+
+    - name: Remove the nodes
+      kenyawest.remnawave.nodes:
+        nodes:
+          - {name: billed-ams, state: absent}
+          - {name: billed-fra, state: absent}
+          - {name: billed-waw, state: absent}
+
+    - name: Remove the providers
+      kenyawest.remnawave.infra_providers:
+        providers:
+          - {name: Hetzner, state: absent}
+          - {name: Vultr, state: absent}
+
+    - name: Remove the config profile
+      kenyawest.remnawave.config_profile:
+        name: billed-profile
+        state: absent

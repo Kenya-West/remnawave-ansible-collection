@@ -22,6 +22,8 @@ PROFILE_UUID = '11111111-1111-1111-1111-111111111111'
 INBOUND_UUID = '22222222-2222-2222-2222-222222222222'
 AMS_UUID = '33333333-3333-3333-3333-333333333333'
 FRA_UUID = '44444444-4444-4444-4444-444444444444'
+HETZNER_UUID = '55555555-5555-5555-5555-555555555555'
+OVH_UUID = '66666666-6666-6666-6666-666666666666'
 
 
 class FakeModule(object):
@@ -45,6 +47,7 @@ class FakeClient(object):
             '/api/nodes': [
                 {'uuid': AMS_UUID, 'name': 'nl-ams-1', 'address': '203.0.113.10',
                  'port': 2222, 'isDisabled': False, 'tags': [], 'viewPosition': 1,
+                 'providerUuid': HETZNER_UUID,
                  'configProfile': {'activeConfigProfileUuid': PROFILE_UUID,
                                    'activeInbounds': [{'uuid': INBOUND_UUID}]}},
                 {'uuid': FRA_UUID, 'name': 'de-fra-1', 'address': '203.0.113.20',
@@ -56,6 +59,10 @@ class FakeClient(object):
                 'uuid': PROFILE_UUID, 'name': 'default-profile',
                 'inbounds': [{'uuid': INBOUND_UUID, 'tag': 'vless'}],
             }]},
+            '/api/infra-billing/providers': {'providers': [
+                {'uuid': HETZNER_UUID, 'name': 'Hetzner'},
+                {'uuid': OVH_UUID, 'name': 'OVHcloud'},
+            ]},
             '/api/hosts': [
                 {'uuid': 'h-ams', 'remark': 'Amsterdam', 'isDisabled': False,
                  'nodes': [AMS_UUID]},
@@ -170,6 +177,39 @@ class TestPlanNode(unittest.TestCase):
                          ['h-ams', 'h-both'])
 
 
+class TestPlanNodeProvider(unittest.TestCase):
+
+    def plan(self, module=None, **options):
+        return plan_node(module or FakeModule(), FakeClient(), entry(**options))
+
+    def test_provider_is_given_by_name(self):
+        plan = self.plan(name='de-fra-1', provider='OVHcloud')
+        self.assertEqual(plan['payload'], {'providerUuid': OVH_UUID, 'uuid': FRA_UUID})
+
+    def test_provider_given_by_uuid_or_name_is_the_same(self):
+        self.assertEqual(self.plan(name='nl-ams-1', provider='Hetzner')['action'], 'none')
+        self.assertEqual(self.plan(name='nl-ams-1', provider=HETZNER_UUID)['action'], 'none')
+
+    def test_an_empty_provider_unlinks_the_node(self):
+        plan = self.plan(name='nl-ams-1', provider='')
+        self.assertEqual(plan['payload'], {'providerUuid': None, 'uuid': AMS_UUID})
+        self.assertEqual(self.plan(name='de-fra-1', provider='')['action'], 'none')
+
+    def test_an_unknown_provider_fails_but_in_check_mode(self):
+        with self.assertRaisesRegex(RemnawaveApiError, "'Nowhere' not found.*Hetzner"):
+            self.plan(name='nl-ams-1', provider='Nowhere')
+        module = FakeModule()
+        module.check_mode = True
+        plan = self.plan(module=module, name='nl-ams-1', provider='Nowhere')
+        self.assertEqual(plan['after'], {'providerUuid': 'Nowhere'})
+
+    def test_providers_are_read_only_when_a_node_sets_one(self):
+        self.assertNotIn('/api/infra-billing/providers',
+                         node_listings([entry(name='a', provider='')]))
+        self.assertIn('/api/infra-billing/providers',
+                      node_listings([entry(name='a', provider='Hetzner')]))
+
+
 class TestPlanNodes(unittest.TestCase):
 
     def test_listings_are_read_once_for_the_whole_batch(self):
@@ -246,6 +286,13 @@ class TestApplyNodePlans(unittest.TestCase):
             'uuids': [AMS_UUID, FRA_UUID],
             'fields': {'tags': ['PROD'], 'countryCode': 'NL'}})])
         self.assertEqual([r['changed'] for r in results], [True, True])
+
+    def test_the_same_provider_shares_one_request(self):
+        client, plans, results, failure = self.apply([
+            dict(name='nl-ams-1', provider='OVHcloud'),
+            dict(name='de-fra-1', provider=OVH_UUID)])
+        self.assertEqual(client.writes, [('POST', '/api/nodes/bulk-actions/update', {
+            'uuids': [AMS_UUID, FRA_UUID], 'fields': {'providerUuid': OVH_UUID}})])
 
     def test_the_same_profile_change_shares_one_request(self):
         client = FakeClient()

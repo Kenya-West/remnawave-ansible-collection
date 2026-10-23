@@ -34,8 +34,8 @@ description:
     and to disable, in one request each. Nodes to update; those given
     exactly the same change of the fields the panel can set on many nodes
     at once - O(nodes[].country_code), O(nodes[].consumption_multiplier),
-    O(nodes[].tags), O(nodes[].note), or the config profile and inbounds -
-    are updated together in one request. Nodes to create. Then the nodes
+    O(nodes[].tags), O(nodes[].note), O(nodes[].provider), or the config
+    profile and inbounds - are updated together in one request. Nodes to create. Then the nodes
     created with O(nodes[].state=disabled) are disabled, in one request.
     Each step sends up to O(parallelism) requests at once; creations do so
     with O(ordered) only, and otherwise go one at a time in list order.
@@ -170,10 +170,17 @@ options:
         description:
           - Free-form note. Set to an empty string to clear it.
         type: str
+      provider:
+        description:
+          - Infra billing provider the node is hosted at, by name or UUID.
+            Set to an empty string to unlink the node from its provider.
+        type: str
+        version_added: 1.4.0
 seealso:
   - module: kenyawest.remnawave.node
   - module: kenyawest.remnawave.node_info
   - module: kenyawest.remnawave.hosts
+  - module: kenyawest.remnawave.infra_providers
 '''
 
 EXAMPLES = r'''

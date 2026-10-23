@@ -3,7 +3,7 @@ argument_specs:
   main:
     short_description: Declaratively manage Remnawave panel entities
     description:
-      - Applies the desired state described by the C(remnawave_*) variables to a Remnawave panel, in dependency order (config profiles, squads, nodes, hosts,
+      - Applies the desired state described by the C(remnawave_*) variables to a Remnawave panel, in dependency order (config profiles, squads, infra providers, nodes, hosts,
         users, subscription settings).
       - Optionally reads entities back afterwards (C(remnawave_gather)) into the C(remnawave_gathered) fact.
       - Every list item accepts the options of the corresponding module of this collection; only the identifier (C(name), C(username), C(remark),
@@ -57,6 +57,13 @@ argument_specs:
         elements: dict
         default: []
         description: Desired external squads (options of kenyawest.remnawave.external_squad).
+      remnawave_infra_providers:
+        type: list
+        elements: dict
+        default: []
+        description:
+          - Desired infra billing providers (options of kenyawest.remnawave.infra_provider).
+          - Applied before nodes, which are linked to them by name.
       remnawave_nodes:
         type: list
         elements: dict
@@ -100,6 +107,11 @@ argument_specs:
           external_squads:
             type: dict
             description: Options of kenyawest.remnawave.external_squad_info (C(name)).
+          infra_providers:
+            type: dict
+            description:
+              - Options of kenyawest.remnawave.infra_provider_info (C(name)).
+              - Also publishes the names of the nodes of each provider as C(remnawave_gathered.infra_provider_nodes).
           nodes:
             type: dict
             description: Options of kenyawest.remnawave.node_info (C(name)).

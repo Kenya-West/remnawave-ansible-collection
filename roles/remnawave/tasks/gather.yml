@@ -39,6 +39,14 @@
   when: "'external_squads' in remnawave_gather"
   register: __remnawave_gathered_external_squads
 
+- name: Gather infra providers
+  kenyawest.remnawave.infra_provider_info:
+    name: "{{ __remnawave_query.name | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.infra_providers or {} }}"
+  when: "'infra_providers' in remnawave_gather"
+  register: __remnawave_gathered_infra_providers
+
 - name: Gather nodes
   kenyawest.remnawave.node_info:
     name: "{{ __remnawave_query.name | default(omit) }}"
@@ -107,6 +115,9 @@
                    if 'internal_squads' in remnawave_gather else {})
          | combine({'external_squads': __remnawave_gathered_external_squads.squads}
                    if 'external_squads' in remnawave_gather else {})
+         | combine({'infra_providers': __remnawave_gathered_infra_providers.providers,
+                    'infra_provider_nodes': __remnawave_gathered_infra_providers.nodes}
+                   if 'infra_providers' in remnawave_gather else {})
          | combine({'nodes': __remnawave_gathered_nodes.nodes}
                    if 'nodes' in remnawave_gather else {})
          | combine({'hosts': __remnawave_gathered_hosts.hosts}

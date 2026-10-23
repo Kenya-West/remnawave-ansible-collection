@@ -183,6 +183,27 @@ def set_tags(client, collection, entity, tags):
     return updated
 
 
+def list_infra_providers(client):
+    data = client.get('/api/infra-billing/providers', cached=True)
+    return (data or {}).get('providers', [])
+
+
+def find_infra_provider(client, name_or_uuid, required=False):
+    """The infra provider with this name or UUID; names are unique."""
+    key = 'uuid' if is_uuid(name_or_uuid) else 'name'
+    matches = [p for p in list_infra_providers(client)
+               if p.get(key) == name_or_uuid]
+    if not matches:
+        if required:
+            raise RemnawaveApiError(
+                'Infra provider %r not found (available: %s)'
+                % (name_or_uuid, ', '.join(sorted(
+                    p.get('name') for p in list_infra_providers(client)
+                    if p.get('name')))))
+        return None
+    return matches[0]
+
+
 def list_nodes(client):
     return client.get('/api/nodes', cached=True) or []
 

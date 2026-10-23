@@ -11,12 +11,14 @@ remnawave_timeout: 30
 remnawave_request_headers: {}
 # Desired state. Each list item accepts the options of the corresponding
 # module (kenyawest.remnawave.snippet, config_profile, internal_squad,
-# external_squad, node, host, user); see the module documentation for the
-# full option list. Snippets come first because config profiles embed them.
+# external_squad, infra_provider, node, host, user); see the module
+# documentation for the full option list. Snippets come first because config
+# profiles embed them, and infra providers precede the nodes linked to them.
 remnawave_snippets: []
 remnawave_config_profiles: []
 remnawave_internal_squads: []
 remnawave_external_squads: []
+remnawave_infra_providers: []
 remnawave_nodes: []
 remnawave_hosts: []
 remnawave_users: []
@@ -25,7 +27,8 @@ remnawave_users: []
 remnawave_subscription_settings: {}
 # Entities to read back after the desired state is applied, published as the
 # remnawave_gathered fact. Keys: snippets, config_profiles, internal_squads,
-# external_squads, nodes, hosts, users, subscription_settings, system. A key
+# external_squads, infra_providers, nodes, hosts, users, subscription_settings,
+# system. A key
 # being present gathers that kind; its value holds the options of the
 # matching *_info module (empty or null means "all"). Empty gathers nothing.
 remnawave_gather: {}

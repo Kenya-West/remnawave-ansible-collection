@@ -1,0 +1,9 @@
+---
+minor_changes:
+  - node, nodes - add ``provider``, the infra billing provider the node is hosted at, by name or UUID;
+    an empty string unlinks the node. ``nodes`` sets the same provider on several nodes in one bulk
+    request.
+  - remnawave role - add ``remnawave_infra_providers``, applied in one ``kenyawest.remnawave.infra_providers``
+    task before the nodes, pass ``provider`` through for ``remnawave_nodes``, and accept ``infra_providers``
+    in ``remnawave_gather``, published as ``remnawave_gathered.infra_providers`` and
+    ``remnawave_gathered.infra_provider_nodes``.

@@ -15,8 +15,8 @@ Consequences:
 - One module may call several endpoints. `node` uses list/create/update/
   delete, the enable/disable action endpoints and the host bulk endpoints,
   all behind `state` and `linked_hosts`.
-- Most endpoints are not exposed at all. Statistics, billing, plugins and
-  similar controllers have no module. The API may gain endpoints without the
+- Most endpoints are not exposed at all. Statistics, billing records,
+  plugins and similar controllers have no module. The API may gain endpoints without the
   collection needing a release.
 - The public contract of the collection is its module options, which are
   Ansible-flavored (snake_case, human units, names instead of UUIDs) and
@@ -33,9 +33,10 @@ Consequences:
 - `module_utils/common.py` - the desired/current comparison engine
   (`FieldSpec`, `build_patch`), value normalization (sizes, timestamps,
   sets), the common argument spec, and check-mode helpers.
-- `module_utils/host.py` and `module_utils/node.py` - the host and node
-  options, and planning and applying one entity's change, shared by `host`
-  and `hosts`, and by `node` and `nodes`.
+- `module_utils/host.py`, `module_utils/node.py` and
+  `module_utils/infra_provider.py` - the options of a host, a node and an
+  infra provider, and planning and applying one entity's change, shared by
+  the single-entity module and its batch module.
 - `module_utils/batch.py` - what the batch modules share in writing: running
   writes concurrently and putting a batch in list order.
 - `plugins/modules/*` - one file per resource; mostly declarative field
@@ -121,6 +122,34 @@ configuration-management relationship (a host bound to a node cannot serve
 traffic once that node is gone), not a general "delete related objects"
 framework.
 
+## Infra providers are linked from the node
+
+The panel relates a node to an infra provider twice. A node has a
+`providerUuid` of its own: where it is hosted. And a *billed node* is a
+separate record pairing a provider with a node and a next billing date,
+next to the provider's billing history of payments made.
+
+Only the first is configuration. Where a node runs is decided once, by
+whoever provisions it, and is the same on every run; it is managed as the
+node's `provider` option, by name like every other cross-reference, and
+the batch module sets it on many nodes in one bulk update. The billing date
+and the payment history, by contrast, move as bills are paid - a playbook
+that declared them would undo the payments recorded in the panel - so they
+are left to the panel and the `api` module, as actions are.
+
+The link lives on the node rather than in a provider's list of nodes for
+the same reason a host's binding lives on the host: the node is declared in
+the playbook next to everything else about it, and a provider declared
+without its nodes must not unlink them.
+
+Deleting a provider is the one place the two meet. The panel unlinks the
+provider's nodes and deletes its billing history and billed nodes with it.
+That is not a cascade the collection runs, so there is no option to opt
+into it, but it is not undoable either: the diff of a deletion lists the
+nodes, bills and billed nodes it takes along, in check mode too. Providers
+come before nodes in the role, so a node can name a provider created in the
+same run.
+
 ## Batches
 
 A task is a module run, and a module run - more so over SSH - costs far
@@ -130,7 +159,7 @@ downloads the same host, node and profile listings to resolve the same
 names. `hosts` exists for that case only: it is `host` taking a list, not a
 different model. Its entries are the options of `host`, and both modules go
 through the same planning and applying code, so the two cannot drift apart.
-`nodes` is the same to `node`.
+`nodes` is the same to `node`, and `infra_providers` to `infra_provider`.
 
 The rules a batch follows:
 

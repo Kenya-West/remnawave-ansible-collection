@@ -3,7 +3,8 @@
 Implements just enough of the v3.4 API surface for the integration
 playbook of this collection: bearer-token auth, the optional Caddy
 X-Api-Key check, the {"response": ...} envelope, and CRUD for config
-profiles, squads, nodes, hosts, users and subscription settings.
+profiles, squads, nodes, hosts, users, infra providers and subscription
+settings.
 
 Usage: mock_panel.py [port]
 Environment: MOCK_TOKEN (default "test-token"),
@@ -32,6 +33,10 @@ DB = {
     'hosts': {},
     'users': {},
     'snippets': {},
+    'infra_providers': {},
+    # Billing records per provider uuid, which tests seed through the
+    # history endpoint to see a provider deletion take them along.
+    'infra_billing_history': {},
     # Counts sync actions per snippet name, so the tests can assert when a
     # snippet was actually pushed to the config profiles using it.
     'snippet_syncs': {},
@@ -339,6 +344,7 @@ def make_node(body):
         'countryCode': body.get('countryCode', 'XX'),
         'consumptionMultiplier': body.get('consumptionMultiplier', 1),
         'tags': body.get('tags', []), 'note': body.get('note'),
+        'providerUuid': body.get('providerUuid'),
         'configProfile': {
             'activeConfigProfileUuid': profile.get('activeConfigProfileUuid'),
             'activeInbounds': [
@@ -427,6 +433,91 @@ def node_action(handler, node_uuid, action):
     if action in ('enable', 'disable'):
         node['isDisabled'] = (action == 'disable')
     handler.reply(200, node)
+
+
+def provider_view(provider):
+    records = [r for r in DB['infra_billing_history'].values()
+               if r['providerUuid'] == provider['uuid']]
+    view = dict(provider)
+    view['billingHistory'] = {
+        'totalAmount': sum(r['amount'] for r in records),
+        'totalBills': len(records)}
+    view['billingNodes'] = []
+    return view
+
+
+def providers_list(handler):
+    providers = sorted(DB['infra_providers'].values(),
+                       key=lambda p: p['createdAt'])
+    handler.reply(200, {'total': len(providers),
+                        'providers': [provider_view(p) for p in providers]})
+
+
+def provider_conflict(handler, body, own_uuid=None):
+    if any(p['name'] == body.get('name') and p['uuid'] != own_uuid
+           for p in DB['infra_providers'].values()):
+        conflict(handler, 'Infra provider name already exists')
+        return True
+    return False
+
+
+def provider_create(handler):
+    body = handler.read_body()
+    if any(body.get(k) is None for k in ('faviconLink', 'loginUrl') if k in body):
+        handler.reply(400, {'message': 'Validation failed',
+                            'errorCode': 'VALIDATION_ERROR'}, envelope=False)
+        return
+    if provider_conflict(handler, body):
+        return
+    DB['provider_sequence'] = DB.get('provider_sequence', 0) + 1
+    provider = {
+        'uuid': new_uuid(), 'name': body['name'],
+        'faviconLink': body.get('faviconLink'),
+        'loginUrl': body.get('loginUrl'),
+        'createdAt': '2026-01-01T00:00:%02d.000Z' % DB['provider_sequence'],
+        'updatedAt': '2026-01-01T00:00:00.000Z',
+    }
+    DB['infra_providers'][provider['uuid']] = provider
+    handler.reply(201, provider_view(provider))
+
+
+def provider_update(handler):
+    body = handler.read_body()
+    provider = DB['infra_providers'].get(body.get('uuid'))
+    if not provider:
+        handler.not_found()
+        return
+    if 'name' in body and provider_conflict(handler, body, provider['uuid']):
+        return
+    for key in ('name', 'faviconLink', 'loginUrl'):
+        if key in body:
+            provider[key] = body[key]
+    handler.reply(200, provider_view(provider))
+
+
+def provider_delete(handler, provider_uuid):
+    """Like the panel: nodes lose the provider, its records go with it."""
+    if DB['infra_providers'].pop(provider_uuid, None) is None:
+        handler.not_found()
+        return
+    for node in DB['nodes'].values():
+        if node.get('providerUuid') == provider_uuid:
+            node['providerUuid'] = None
+    for record_uuid, record in list(DB['infra_billing_history'].items()):
+        if record['providerUuid'] == provider_uuid:
+            del DB['infra_billing_history'][record_uuid]
+    handler.reply(200, {'isDeleted': True})
+
+
+def billing_record_create(handler):
+    body = handler.read_body()
+    if body.get('providerUuid') not in DB['infra_providers']:
+        handler.not_found()
+        return
+    record = {'uuid': new_uuid(), 'providerUuid': body['providerUuid'],
+              'amount': body['amount'], 'billedAt': body['billedAt']}
+    DB['infra_billing_history'][record['uuid']] = record
+    handler.reply(201, {'records': [record], 'total': 1})
 
 
 def make_host(body):
@@ -741,6 +832,11 @@ ROUTES = [
     (r'POST /api/nodes/(%s)/actions/(enable|disable)' % UUID, node_action),
     (r'POST /api/nodes/bulk-actions(|/update|/profile-modification)', nodes_bulk),
     (r'POST /api/nodes/actions/reorder', nodes_reorder),
+    (r'GET /api/infra-billing/providers', providers_list),
+    (r'POST /api/infra-billing/providers', provider_create),
+    (r'PATCH /api/infra-billing/providers', provider_update),
+    (r'DELETE /api/infra-billing/providers/(%s)' % UUID, provider_delete),
+    (r'POST /api/infra-billing/history', billing_record_create),
     (r'GET /api/hosts', host_list),
     (r'POST /api/hosts', host_create),
     (r'PATCH /api/hosts', host_update),

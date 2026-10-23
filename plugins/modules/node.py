@@ -130,10 +130,20 @@ options:
     description:
       - Free-form note. Set to an empty string to clear it.
     type: str
+  provider:
+    description:
+      - Infra billing provider the node is hosted at, by name or UUID; see
+        M(kenyawest.remnawave.infra_provider). Set to an empty string to
+        unlink the node from its provider.
+      - Linking a node to a provider does not start billing it; the panel's
+        billed nodes and billing records are not managed.
+    type: str
+    version_added: 1.4.0
 seealso:
   - module: kenyawest.remnawave.node_info
   - module: kenyawest.remnawave.host
   - module: kenyawest.remnawave.config_profile
+  - module: kenyawest.remnawave.infra_provider
 '''
 
 EXAMPLES = r'''
@@ -149,6 +159,7 @@ EXAMPLES = r'''
     inbounds:
       - vless-reality
     country_code: NL
+    provider: Hetzner
 
 - name: Decommission a node together with the hosts bound to it
   kenyawest.remnawave.node:

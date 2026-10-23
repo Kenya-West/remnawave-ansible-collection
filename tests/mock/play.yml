@@ -45,6 +45,10 @@
       - name: resellers
         tags: [PARTNER]
 
+    remnawave_infra_providers:
+      - name: Contabo
+        login_url: https://my.contabo.com
+
     remnawave_nodes:
       - name: nl-ams-1
         address: 203.0.113.10
@@ -54,6 +58,7 @@
           - vless-reality
         state: "{{ node_state | default('enabled') }}"
         country_code: NL
+        provider: Contabo
 
     remnawave_hosts:
       - remark: Amsterdam

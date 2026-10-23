@@ -51,6 +51,21 @@
       loop_control:
         label: "{{ item.name }}"
 
+    # Before the nodes, which are linked to providers by name. A provider
+    # deleted here unlinks its nodes and takes its billing history along.
+    - name: Manage infra providers
+      kenyawest.remnawave.infra_providers:
+        providers: >-
+          {{
+            remnawave_infra_providers
+            | map('dict2items')
+            | map('selectattr', 'key', 'in', ['name', 'state', 'favicon_link', 'login_url'])
+            | map('list')
+            | map('items2dict')
+            | list
+          }}
+      when: remnawave_infra_providers | length > 0
+
     # One task for every node, as for the hosts below: a loop would be a
     # module run per node, writing one node at a time. Keys the module does
     # not know are dropped, as the loop used to ignore them.
@@ -82,6 +97,7 @@
           - consumption_multiplier
           - tags
           - note
+          - provider
       when: remnawave_nodes | length > 0
 
     # One task for every host: a loop would be a module run per host, each

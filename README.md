@@ -52,7 +52,8 @@ only the Python standard library.
 | Module | Purpose |
 | --- | --- |
 | `user`, `user_info` | Panel users: expiration, traffic limits, squad membership, enable/disable; server-side filtering, sorting and pagination when reading |
-| `node`, `nodes`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, cascade onto linked hosts. `nodes` manages a whole list in one task |
+| `node`, `nodes`, `node_info` | Nodes: address, active config profile and inbounds, enable/disable, traffic accounting, infra provider, cascade onto linked hosts. `nodes` manages a whole list in one task |
+| `infra_provider`, `infra_providers`, `infra_provider_info` | Infra billing providers - where nodes are hosted - with their login and icon links. Nodes are linked to them by name through `node`'s `provider`. `infra_providers` manages a whole list in one task |
 | `host`, `hosts`, `host_info` | Subscription hosts: address, SNI, transport parameters, VLESS route id, node binding, subscription and squad visibility. Addressable by remark or by domain (`identify_by`). `hosts` manages a whole list in one task |
 | `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative). Addressable by name or by the tag of one of their inbounds; `config_profile_info` turns an inbound tag into the inbound's and the profile's UUIDs |
 | `snippet`, `snippet_info` | Reusable configuration fragments, with syncing into the profiles that embed them |
@@ -509,9 +510,12 @@ and reused until the module writes something.
 
 ## What is intentionally not covered
 
-Infra billing, node plugins and integrations, HWID device management, API
-token management, passkeys and subscription page configs are not modeled
-(yet). Of the bulk endpoints, only the host ones are used: by the node
+Infra billing records and the billing schedule of nodes (next billing
+dates), node plugins and integrations, HWID device management, API token
+management, passkeys and subscription page configs are not modeled (yet).
+Billing records and dates track payments rather than configuration: they
+change as bills are paid, so a playbook declaring them would fight whoever
+pays them. Of the bulk endpoints, only the host ones are used: by the node
 cascade, and by `hosts` to delete and update many hosts in one request -
 and the node ones, by `nodes` to enable, disable and update many nodes in
 one request. If you need something else, use the escape hatch:

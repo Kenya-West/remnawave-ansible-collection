@@ -36,6 +36,9 @@
 # Part 10 (nodes.yml) exercises managing many nodes in one task, including
 # the bulk requests it makes and putting the nodes in list order.
 #
+# Part 11 (providers.yml) exercises infra billing providers, linking nodes
+# to them, and what deleting a provider takes along.
+#
 # Requires the collection to be reachable via ANSIBLE_COLLECTIONS_PATH,
 # e.g.  tests/mock/run.sh  from a checkout symlinked as
 # <path>/ansible_collections/kenyawest/remnawave.
@@ -71,8 +74,8 @@ assert_changed() {
 }
 
 PLAY="$HERE/play.yml"
-out="$(run "$PLAY" --check --diff)";       assert_changed "check mode on fresh panel"    8 "$out"
-out="$(run "$PLAY")";                      assert_changed "first apply"                  8 "$out"
+out="$(run "$PLAY" --check --diff)";       assert_changed "check mode on fresh panel"    9 "$out"
+out="$(run "$PLAY")";                      assert_changed "first apply"                  9 "$out"
 out="$(run "$PLAY")";                      assert_changed "second apply is a no-op"      0 "$out"
 out="$(run "$PLAY" -e alice_traffic=50GB -e node_state=disabled)"
                                            assert_changed "delta apply"                  2 "$out"
@@ -149,6 +152,14 @@ if out="$(run "$HERE/nodes.yml")"; then
     echo "PASS: nodes managed in one task"
 else
     echo "FAIL: nodes managed in one task"
+    echo "$out" | tail -60
+    exit 1
+fi
+
+if out="$(run "$HERE/providers.yml")"; then
+    echo "PASS: infra providers and their nodes"
+else
+    echo "FAIL: infra providers and their nodes"
     echo "$out" | tail -60
     exit 1
 fi

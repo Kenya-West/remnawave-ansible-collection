@@ -46,11 +46,12 @@ reference names created by the previous ones:
 2. config profiles (`remnawave_config_profiles`)
 3. internal squads (`remnawave_internal_squads`)
 4. external squads (`remnawave_external_squads`)
-5. nodes (`remnawave_nodes`)
-6. hosts (`remnawave_hosts`)
-7. users (`remnawave_users`)
-8. subscription settings (`remnawave_subscription_settings`)
-9. reading entities back (`remnawave_gather`), see
+5. infra billing providers (`remnawave_infra_providers`)
+6. nodes (`remnawave_nodes`)
+7. hosts (`remnawave_hosts`)
+8. users (`remnawave_users`)
+9. subscription settings (`remnawave_subscription_settings`)
+10. reading entities back (`remnawave_gather`), see
    [Reading entities back](#reading-entities-back)
 
 Each stage is skipped when its variable is empty, which is the default. So a
@@ -66,7 +67,8 @@ panel URL, so the play normally runs on `localhost` (or on any host with
 network access to the panel). Prefer `localhost`: against a remote host every
 task goes over SSH, which costs seconds per task.
 
-Nodes and hosts are applied in a single `kenyawest.remnawave.nodes` and
+Infra providers, nodes and hosts are applied in a single
+`kenyawest.remnawave.infra_providers`, `kenyawest.remnawave.nodes` and
 `kenyawest.remnawave.hosts` task each rather than a loop, so each stage reads
 the panel once however many entries it declares, writes several at a time,
 and fails over a bad entry before anything is written. Both arrange the panel
@@ -108,6 +110,7 @@ the play - the modules fall back to them.
 | `remnawave_config_profiles` | list of dict | `[]` | `kenyawest.remnawave.config_profile` |
 | `remnawave_internal_squads` | list of dict | `[]` | `kenyawest.remnawave.internal_squad` |
 | `remnawave_external_squads` | list of dict | `[]` | `kenyawest.remnawave.external_squad` |
+| `remnawave_infra_providers` | list of dict | `[]` | `kenyawest.remnawave.infra_provider` |
 | `remnawave_nodes` | list of dict | `[]` | `kenyawest.remnawave.node` |
 | `remnawave_hosts` | list of dict | `[]` | `kenyawest.remnawave.host` |
 | `remnawave_users` | list of dict | `[]` | `kenyawest.remnawave.user` |
@@ -160,6 +163,16 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | `state` | str | `present` (default) or `absent`. |
 | `tags` | list of str | Authoritative when set. |
 
+**`remnawave_infra_providers`** - the hosting companies nodes run at.
+Applied before nodes, which refer to them by name.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `name` | str | Required. Identifier, 2 to 30 characters; cannot be renamed through the role. |
+| `state` | str | `present` (default) or `absent`. Deleting a provider unlinks its nodes and deletes its billing history and billed nodes with it. |
+| `favicon_link` | str | URL of the icon shown in the panel; an empty string clears it. |
+| `login_url` | str | URL of the provider's control panel; an empty string clears it. |
+
 **`remnawave_nodes`**
 
 | Key | Type | Notes |
@@ -179,6 +192,7 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | `consumption_multiplier` | float | Multiplier applied to user traffic on this node. |
 | `tags` | list of str | Authoritative when set. |
 | `note` | str | Free-form note; an empty string clears it. |
+| `provider` | str | Infra provider the node runs at, by name; an empty string unlinks it. |
 
 **`remnawave_hosts`** - entries of the subscription.
 
@@ -259,6 +273,7 @@ matching info module; leave it empty (or `{}`) to read everything.
 | `config_profiles` | `name` or `inbound` (`config_profile_info`) | `remnawave_gathered.config_profiles`, plus their inbounds with UUIDs and profile names as `remnawave_gathered.inbounds` |
 | `internal_squads` | `name` (`internal_squad_info`) | `remnawave_gathered.internal_squads` |
 | `external_squads` | `name` (`external_squad_info`) | `remnawave_gathered.external_squads` |
+| `infra_providers` | `name` (`infra_provider_info`) | `remnawave_gathered.infra_providers`, plus the names of each provider's nodes as `remnawave_gathered.infra_provider_nodes` |
 | `nodes` | `name` (`node_info`) | `remnawave_gathered.nodes` |
 | `hosts` | `remark` or `address` (`host_info`) | `remnawave_gathered.hosts` |
 | `users` | see below (`user_info`) | `remnawave_gathered.users`, plus `remnawave_gathered.users_page` |

@@ -26,15 +26,15 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import 
     parse_traffic_limit, resolve_for_check_mode, validate_tags,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
-    bulk_host_action, find_node, hosts_linked_to_node, list_nodes,
-    resolve_inbound_uuids,
+    bulk_host_action, find_infra_provider, find_node, hosts_linked_to_node,
+    list_nodes, resolve_inbound_uuids,
 )
 
 
 # The fields the panel sets on many nodes at once: these through its bulk
 # update, the config profile through its bulk profile modification.
 BULK_UPDATE_FIELDS = frozenset(
-    ['countryCode', 'consumptionMultiplier', 'tags', 'note'])
+    ['countryCode', 'consumptionMultiplier', 'tags', 'note', 'providerUuid'])
 
 
 def node_options():
@@ -56,6 +56,7 @@ def node_options():
         consumption_multiplier=dict(type='float'),
         tags=dict(type='list', elements='str'),
         note=dict(type='str'),
+        provider=dict(type='str'),
     )
 
 
@@ -72,6 +73,8 @@ def node_listings(entries):
         paths.append('/api/config-profiles')
     if any(e['linked_hosts'] != 'ignore' for e in entries):
         paths.append('/api/hosts')
+    if any(e['state'] != 'absent' and e['provider'] for e in entries):
+        paths.append('/api/infra-billing/providers')
     return paths
 
 
@@ -97,8 +100,16 @@ def build_fields(module, client, params):
         FieldSpec('consumption_multiplier', 'consumptionMultiplier'),
         FieldSpec('tags', 'tags', kind='set', to_api=validate_tags),
         FieldSpec('note', 'note', to_api=lambda v: v or None),
+        # Resolved below; an empty string unlinks the provider.
+        FieldSpec('provider', 'providerUuid', to_api=lambda v: v or None),
     ]
     resolved = dict(params)
+    if params['provider']:
+        resolved['provider'] = resolve_for_check_mode(
+            module,
+            lambda: find_infra_provider(client, params['provider'],
+                                        required=True)['uuid'],
+            params['provider'])
     if params['config_profile'] is not None or params['inbounds'] is not None:
         # The inbounds alone suffice: their tags are unique across profiles,
         # so they name their profile too.

@@ -11,6 +11,9 @@ action_groups:
     - host
     - hosts
     - host_info
+    - infra_provider
+    - infra_provider_info
+    - infra_providers
     - internal_squad
     - internal_squad_info
     - node

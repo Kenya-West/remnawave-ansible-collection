@@ -134,6 +134,7 @@
           - tags
           - server_description
           - vless_route_id
+          - final_mask
           - override_sni_from_address
           - keep_sni_blank
           - exclude_from_subscription_types

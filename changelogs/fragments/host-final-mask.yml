@@ -1,0 +1,5 @@
+---
+minor_changes:
+  - host, hosts - add ``final_mask``, the Xray ``finalmask`` settings of a host, as a dict or a JSON string;
+    an empty string clears it.
+  - remnawave role - pass ``final_mask`` through for ``remnawave_hosts``.

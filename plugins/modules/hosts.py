@@ -193,6 +193,13 @@ options:
           - VLESS route id advertised with this host, an integer between 0 and
             65535. Set to an empty string to clear it.
         type: raw
+      final_mask:
+        description:
+          - The Xray C(finalmask) settings clients of this host use, as a dict
+            or a JSON-encoded string. Authoritative when set, and passed on to
+            the panel as given. Set to an empty string to clear it.
+        type: raw
+        version_added: 1.5.0
       override_sni_from_address:
         description:
           - Whether the panel derives the SNI from O(hosts[].address) instead

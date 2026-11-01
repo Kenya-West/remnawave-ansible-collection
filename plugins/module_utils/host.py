@@ -77,6 +77,7 @@ def host_options():
         tags=dict(type='list', elements='str'),
         server_description=dict(type='str'),
         vless_route_id=dict(type='raw'),
+        final_mask=dict(type='raw'),
         override_sni_from_address=dict(type='bool'),
         keep_sni_blank=dict(type='bool'),
         exclude_from_subscription_types=dict(
@@ -114,6 +115,26 @@ def to_route_id(value):
     return number
 
 
+def to_final_mask(value):
+    """Normalize the final_mask option into a dict or None.
+
+    Empty string clears the field, matching how the other nullable host
+    options are cleared. The contents are Xray's to define, so they are
+    passed on without looking inside.
+    """
+    if value is None or value == '':
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError as exc:
+            raise ValueError('final_mask is not valid JSON: %s' % exc)
+    if not isinstance(value, dict):
+        raise ValueError('final_mask must be a dict, a JSON string holding '
+                         'one, or an empty string to clear it')
+    return value
+
+
 def build_fields(module, client, params):
     fields = [
         FieldSpec('address', 'address'),
@@ -129,6 +150,7 @@ def build_fields(module, client, params):
         FieldSpec('server_description', 'serverDescription',
                   to_api=lambda v: v or None),
         FieldSpec('vless_route_id', 'vlessRouteId', to_api=to_route_id),
+        FieldSpec('final_mask', 'finalMask', kind='json', to_api=to_final_mask),
         FieldSpec('override_sni_from_address', 'overrideSniFromAddress'),
         FieldSpec('keep_sni_blank', 'keepSniBlank'),
         FieldSpec('exclude_from_subscription_types',

@@ -224,6 +224,35 @@ with `override_sni_from_address`, since the domain they publish is not the
 one the exit terminates TLS for:
 
 ```yaml
+### Final mask
+
+[Xray's `finalmask`](https://xtls.github.io/ru/config/transports/finalmask.html)
+can be set on a host with `final_mask`, as a dict or a JSON string, and is
+sent to the panel as given. An empty string clears it. In a config profile,
+it is part of `config`, under `streamSettings` of an inbound or outbound:
+
+```yaml
+- kenyawest.remnawave.host:
+    remark: Amsterdam
+    final_mask:
+      udp:
+        - type: "{{ mask_type }}"
+          settings: {}
+
+- kenyawest.remnawave.config_profile:
+    name: default-profile
+    config:
+      inbounds: "{{ profile_inbounds }}"
+      outbounds:
+        - protocol: freedom
+          tag: direct
+          streamSettings:
+            finalmask:
+              udp:
+                - type: "{{ mask_type }}"
+                  settings: {}
+```
+
 # Four chain entries into the same exit, all on one route id
 - kenyawest.remnawave.host:
     identify_by: address
@@ -502,7 +531,7 @@ and reused until the module writes something.
   enabled users. `state: enabled` treats those as satisfied, so a user over
   quota does not flap between runs.
 - **Clearing nullable fields** (`tag`, `email`, `description`, `note`,
-  `vless_route_id`, ...) is done by setting them to an empty string.
+  `vless_route_id`, `final_mask`, ...) is done by setting them to an empty string.
 - **`config_profile.config` and `snippet.snippet` are authoritative**: the
   panel's stored content is made exactly equal to what you supply.
 - **Deleting is explicit**: the role and modules never remove entities that

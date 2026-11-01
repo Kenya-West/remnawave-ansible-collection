@@ -65,6 +65,8 @@ options:
     description:
       - The Xray configuration as a dict or a JSON-encoded string.
       - Required when the profile does not exist yet.
+      - Sent to the panel as given, so any Xray setting can be used, such as
+        C(finalmask) in the C(streamSettings) of an outbound.
     type: raw
   tags:
     description:

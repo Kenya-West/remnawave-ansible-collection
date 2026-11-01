@@ -216,6 +216,7 @@ Applied before nodes, which refer to them by name.
 | `tags` | list of str | Authoritative when set. |
 | `server_description` | str | Free-form description. |
 | `vless_route_id` | int | Route id the config profile's routing rules match on, 0-65535; an empty string clears it. |
+| `final_mask` | dict or JSON str | Xray `finalmask` settings of the host; an empty string clears it. |
 | `override_sni_from_address` | bool | Derive the SNI from `address` instead of using `sni`. |
 | `keep_sni_blank` | bool | Advertise an empty SNI. |
 | `exclude_from_subscription_types` | list of str | Subscription types the host is left out of. Authoritative when set. |

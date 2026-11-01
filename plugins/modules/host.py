@@ -154,6 +154,15 @@ options:
       - An integer between 0 and 65535. Set to an empty string to clear it,
         which leaves the host with no route id.
     type: raw
+  final_mask:
+    description:
+      - The Xray C(finalmask) settings clients of this host use, as a dict or
+        a JSON-encoded string, for example with C(tcp), C(udp) and
+        C(quicParams) keys. See U(https://xtls.github.io/ru/config/transports/finalmask.html).
+      - Authoritative when set, and passed on to the panel as given. Set to an
+        empty string to clear it.
+    type: raw
+    version_added: 1.5.0
   override_sni_from_address:
     description:
       - Whether the panel derives the SNI from O(address) instead of using

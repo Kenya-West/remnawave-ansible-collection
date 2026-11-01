@@ -14,7 +14,7 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import 
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.host import (
     apply_host_plans, arrange_hosts, host_listings, host_options, plan_host,
-    plan_hosts, to_route_id,
+    plan_hosts, to_final_mask, to_route_id,
 )
 
 
@@ -123,6 +123,22 @@ class TestToRouteId(unittest.TestCase):
                 to_route_id(value)
 
 
+class TestToFinalMask(unittest.TestCase):
+
+    def test_empty_clears(self):
+        self.assertIsNone(to_final_mask(''))
+        self.assertIsNone(to_final_mask(None))
+
+    def test_dict_and_json_string(self):
+        self.assertEqual(to_final_mask({'udp': []}), {'udp': []})
+        self.assertEqual(to_final_mask('{"udp": []}'), {'udp': []})
+
+    def test_anything_else_rejected(self):
+        for value in ('not json', '[1]', [1], 5, True):
+            with self.assertRaises(ValueError):
+                to_final_mask(value)
+
+
 class TestPlanHost(unittest.TestCase):
 
     def plan(self, **options):
@@ -131,6 +147,27 @@ class TestPlanHost(unittest.TestCase):
     def test_unchanged_host_needs_nothing(self):
         plan = self.plan(remark='Amsterdam', port=443, nodes=['nl-ams-1'])
         self.assertEqual(plan['action'], 'none')
+
+    def test_final_mask_is_created_with_the_host(self):
+        plan = self.plan(remark='New', final_mask={'udp': []}, **NEW_HOST)
+        self.assertEqual(plan['action'], 'create')
+        self.assertEqual(plan['payload']['finalMask'], {'udp': []})
+
+    def test_final_mask_update_and_clear(self):
+        client = CountingClient()
+        client.responses['/api/hosts'][0]['finalMask'] = {'udp': [{'type': 'a'}]}
+
+        def plan(value):
+            return plan_host(FakeModule(), client,
+                             entry(remark='Amsterdam', final_mask=value))
+
+        self.assertEqual(plan({'udp': [{'type': 'a'}]})['action'], 'none')
+        self.assertEqual(plan('{"udp": [{"type": "a"}]}')['action'], 'none')
+        self.assertEqual(plan({'udp': [{'type': 'b'}]})['payload'],
+                         {'finalMask': {'udp': [{'type': 'b'}]},
+                          'uuid': HOST_UUID})
+        self.assertEqual(plan('')['payload'],
+                         {'finalMask': None, 'uuid': HOST_UUID})
 
     def test_changed_field_is_an_update_of_just_that_field(self):
         plan = self.plan(remark='Amsterdam', port=8443, state='disabled')

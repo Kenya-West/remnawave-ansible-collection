@@ -6,7 +6,7 @@
 # Covers: setting them on creation, idempotency, updating one of them in
 # isolation, order-insensitive comparison of the authoritative lists,
 # resolving squads by name, clearing the route id with an empty string,
-# and the range validation.
+# the final mask, and the range validation.
 - name: Host routing options
   hosts: localhost
   connection: local
@@ -146,6 +146,93 @@
       ansible.builtin.assert:
         that:
           - cleared_again is not changed
+
+    # --- final mask ---------------------------------------------------------
+
+    - name: Give the host a final mask
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        final_mask:
+          udp:
+            - type: noise
+              settings: {}
+      register: masked
+
+    - name: The panel holds the final mask
+      ansible.builtin.assert:
+        that:
+          - masked is changed
+          - masked.host.finalMask.udp[0].type == 'noise'
+
+    - name: The same final mask, as a JSON string, is a no-op
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        final_mask: '{"udp": [{"type": "noise", "settings": {}}]}'
+      register: masked_again
+
+    - name: Setting the final mask is idempotent
+      ansible.builtin.assert:
+        that:
+          - masked_again is not changed
+
+    - name: Create two hosts with a final mask, then change both alike
+      kenyawest.remnawave.hosts:
+        hosts:
+          - remark: "{{ item.0 }}"
+            inbound: routing-inbound
+            address: "{{ item.0 }}.example.com"
+            port: 443
+            final_mask: "{{ item.1 }}"
+          - remark: "{{ item.0 }}-2"
+            inbound: routing-inbound
+            address: "{{ item.0 }}-2.example.com"
+            port: 443
+            final_mask: "{{ item.1 }}"
+      loop:
+        - [masked, {tcp: []}]
+        - [masked, {udp: []}]
+      register: masked_batch
+
+    - name: Both were created with it, and both took the shared update
+      ansible.builtin.assert:
+        that:
+          - masked_batch.results[0].results | map(attribute='action') | list == ['create', 'create']
+          - masked_batch.results[0].results | map(attribute='host.finalMask.tcp') | list == [[], []]
+          - masked_batch.results[1].results | map(attribute='action') | list == ['update', 'update']
+          - masked_batch.results[1].results | map(attribute='host.finalMask.udp') | list == [[], []]
+
+    - name: Remove those two hosts again
+      kenyawest.remnawave.hosts:
+        hosts:
+          - remark: masked
+            state: absent
+          - remark: masked-2
+            state: absent
+
+    - name: Take the final mask away
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        final_mask: ""
+      register: unmasked
+
+    - name: The host has no final mask left
+      ansible.builtin.assert:
+        that:
+          - unmasked is changed
+          - unmasked.host.finalMask is none
+
+    - name: Refuse a final mask that is not an object
+      kenyawest.remnawave.host:
+        remark: chain-entry-1
+        final_mask: "not json"
+      register: bad_mask
+      ignore_errors: true
+
+    - name: The bad final mask is reported
+      ansible.builtin.assert:
+        that:
+          - bad_mask is failed
+          - "'final_mask' in bad_mask.msg"
 
     # --- validation --------------------------------------------------------
 

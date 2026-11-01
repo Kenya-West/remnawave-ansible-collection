@@ -534,6 +534,7 @@ def make_host(body):
         'tags': body.get('tags', []),
         'serverDescription': body.get('serverDescription'),
         'vlessRouteId': body.get('vlessRouteId'),
+        'finalMask': body.get('finalMask'),
         'overrideSniFromAddress': body.get('overrideSniFromAddress', False),
         'keepSniBlank': body.get('keepSniBlank', False),
         'excludeFromSubscriptionTypes':

@@ -4,6 +4,31 @@ kenyawest.remnawave Release Notes
 
 .. contents:: Topics
 
+v1.5.0
+======
+
+Minor Changes
+-------------
+
+- host, hosts - add ``final_mask``, the Xray ``finalmask`` settings of a host, as a dict or a JSON string; an empty string clears it.
+- remnawave role - pass ``final_mask`` through for ``remnawave_hosts``.
+
+v1.4.0
+======
+
+Minor Changes
+-------------
+
+- node, nodes - add ``provider``, the infra billing provider the node is hosted at, by name or UUID; an empty string unlinks the node. ``nodes`` sets the same provider on several nodes in one bulk request.
+- remnawave role - add ``remnawave_infra_providers``, applied in one ``kenyawest.remnawave.infra_providers`` task before the nodes, pass ``provider`` through for ``remnawave_nodes``, and accept ``infra_providers`` in ``remnawave_gather``, published as ``remnawave_gathered.infra_providers`` and ``remnawave_gathered.infra_provider_nodes``.
+
+New Modules
+-----------
+
+- kenyawest.remnawave.infra_provider - Manage Remnawave infra billing providers.
+- kenyawest.remnawave.infra_provider_info - Retrieve Remnawave infra billing providers.
+- kenyawest.remnawave.infra_providers - Manage many Remnawave infra billing providers in one task.
+
 v1.3.0
 ======
 

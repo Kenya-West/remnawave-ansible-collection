@@ -49,6 +49,21 @@ plugins:
       name: hosts
       namespace: ''
       version_added: 1.2.1
+    infra_provider:
+      description: Manage Remnawave infra billing providers
+      name: infra_provider
+      namespace: ''
+      version_added: 1.4.0
+    infra_provider_info:
+      description: Retrieve Remnawave infra billing providers
+      name: infra_provider_info
+      namespace: ''
+      version_added: 1.4.0
+    infra_providers:
+      description: Manage many Remnawave infra billing providers in one task
+      name: infra_providers
+      namespace: ''
+      version_added: 1.4.0
     internal_squad:
       description: Manage Remnawave internal squads
       name: internal_squad
@@ -108,4 +123,4 @@ plugins:
   shell: {}
   strategy: {}
   vars: {}
-version: 1.3.0
+version: 1.5.0

@@ -227,3 +227,35 @@ releases:
       name: nodes
       namespace: ''
     release_date: '2026-10-17'
+  1.4.0:
+    changes:
+      minor_changes:
+      - node, nodes - add ``provider``, the infra billing provider the node is hosted
+        at, by name or UUID; an empty string unlinks the node. ``nodes`` sets the
+        same provider on several nodes in one bulk request.
+      - remnawave role - add ``remnawave_infra_providers``, applied in one ``kenyawest.remnawave.infra_providers``
+        task before the nodes, pass ``provider`` through for ``remnawave_nodes``,
+        and accept ``infra_providers`` in ``remnawave_gather``, published as ``remnawave_gathered.infra_providers``
+        and ``remnawave_gathered.infra_provider_nodes``.
+    fragments:
+    - infra-providers.yml
+    modules:
+    - description: Manage Remnawave infra billing providers.
+      name: infra_provider
+      namespace: ''
+    - description: Retrieve Remnawave infra billing providers.
+      name: infra_provider_info
+      namespace: ''
+    - description: Manage many Remnawave infra billing providers in one task.
+      name: infra_providers
+      namespace: ''
+    release_date: '2026-11-02'
+  1.5.0:
+    changes:
+      minor_changes:
+      - host, hosts - add ``final_mask``, the Xray ``finalmask`` settings of a host,
+        as a dict or a JSON string; an empty string clears it.
+      - remnawave role - pass ``final_mask`` through for ``remnawave_hosts``.
+    fragments:
+    - host-final-mask.yml
+    release_date: '2026-11-02'

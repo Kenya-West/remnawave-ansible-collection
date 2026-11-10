@@ -4,6 +4,18 @@ kenyawest.remnawave Release Notes
 
 .. contents:: Topics
 
+v1.6.0
+======
+
+Minor Changes
+-------------
+
+- Add internal_squads and external_squads batch modules with preflight validation, parallel writes and idempotent ordering.
+- Add response_rule, response_rules and response_rule_info for named subscription response rules while preserving unlisted rules and configuration settings.
+- Add subscription_template, subscription_templates and subscription_template_info for JSON/YAML template content and tags.
+- Extend external_squad with named template assignments, subscription settings, host overrides, response headers, HWID settings, custom remarks and subscription page configuration.
+- Integrate subscription templates and named response rules into the remnawave role and its gathering workflow.
+
 v1.5.0
 ======
 

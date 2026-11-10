@@ -29,6 +29,7 @@ DB = {
     'config_profiles': {},
     'internal_squads': {},
     'external_squads': {},
+    'subscription_templates': {},
     'nodes': {},
     'hosts': {},
     'users': {},
@@ -273,7 +274,7 @@ def cp_update_config(handler):
 def make_internal_squad(body):
     return {
         'uuid': new_uuid(), 'name': body['name'], 'tags': [],
-        'viewPosition': 0,
+        'viewPosition': len(DB['internal_squads']),
         'info': {'membersCount': 0, 'inboundsCount': len(body.get('inbounds', []))},
         'inbounds': [{'uuid': u} for u in body.get('inbounds', [])],
     }
@@ -300,13 +301,51 @@ def isq_update(handler):
 esq_list, esq_create, esq_update, esq_delete = collection_handlers(
     'external_squads', 'externalSquads',
     lambda b: {'uuid': new_uuid(), 'name': b['name'], 'tags': [],
-               'viewPosition': 0, 'info': {'membersCount': 0}})
+               'viewPosition': len(DB['external_squads']), 'info': {'membersCount': 0},
+               'templates': [], 'subscriptionSettings': None, 'hostOverrides': None,
+               'responseHeadersAdd': None, 'responseHeadersRemove': [],
+               'hwidSettings': None, 'customRemarks': None, 'subpageConfigUuid': None})
+
+
+def make_template(body):
+    return dict(uuid=new_uuid(), name=body['name'], tags=[],
+                viewPosition=len(DB['subscription_templates']),
+                templateType=body['templateType'], templateJson={}, encodedTemplateYaml=None)
+
+
+_tpl_list, tpl_create, tpl_update, tpl_delete = collection_handlers(
+    'subscription_templates', 'templates', make_template)
+
+
+def tpl_list(handler):
+    # Like the panel, the list endpoint strips content.
+    templates = [dict(t, templateJson=None, encodedTemplateYaml=None)
+                 for t in sorted(DB['subscription_templates'].values(),
+                                 key=lambda t: t['viewPosition'])]
+    handler.reply(200, {'total': len(templates), 'templates': templates})
+
+
+def tpl_get(handler, item_uuid):
+    item = DB['subscription_templates'].get(item_uuid)
+    if item is None:
+        handler.not_found()
+        return
+    handler.reply(200, item)
+
+
+def reorder_entities(handler, collection):
+    stores = {'internal-squads': 'internal_squads', 'external-squads': 'external_squads',
+              'subscription-templates': 'subscription_templates'}
+    for item in handler.read_body()['items']:
+        DB[stores[collection]][item['uuid']]['viewPosition'] = item['viewPosition']
+    handler.reply(200, {'isUpdated': True})
 
 
 TAGS_STORES = {
     'config-profiles': 'config_profiles',
     'internal-squads': 'internal_squads',
     'external-squads': 'external_squads',
+    'subscription-templates': 'subscription_templates',
 }
 TAG_RE = re.compile(r'^[A-Z0-9_:]{1,36}$')
 
@@ -812,12 +851,18 @@ def health(handler):
 
 UUID = r'[0-9a-f-]{36}'
 ROUTES = [
-    (r'PATCH /api/(config-profiles|internal-squads|external-squads)/tags',
+    (r'PATCH /api/(config-profiles|internal-squads|external-squads|subscription-templates)/tags',
      set_tags),
     (r'GET /api/config-profiles', cp_list),
     (r'POST /api/config-profiles', cp_create),
     (r'PATCH /api/config-profiles', cp_update_config),
     (r'DELETE /api/config-profiles/(%s)' % UUID, cp_delete),
+    (r'POST /api/(internal-squads|external-squads|subscription-templates)/actions/reorder', reorder_entities),
+    (r'GET /api/subscription-templates', tpl_list),
+    (r'GET /api/subscription-templates/(%s)' % UUID, tpl_get),
+    (r'POST /api/subscription-templates', tpl_create),
+    (r'PATCH /api/subscription-templates', tpl_update),
+    (r'DELETE /api/subscription-templates/(%s)' % UUID, tpl_delete),
     (r'GET /api/internal-squads', isq_list),
     (r'POST /api/internal-squads', isq_create),
     (r'PATCH /api/internal-squads', isq_update),

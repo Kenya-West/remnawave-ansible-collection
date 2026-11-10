@@ -113,105 +113,20 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import 
     RemnawaveApiError, RemnawaveClient,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
-    exit_with_change, is_uuid, remnawave_argument_spec, resolve_for_check_mode,
-    tags_differ, validate_tags,
+    remnawave_argument_spec,
 )
-from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
-    find_internal_squad, resolve_inbound_uuids, set_tags,
+from ansible_collections.kenyawest.remnawave.plugins.module_utils.squad import (
+    entity_options, run_single,
 )
-
-
-def resolve_inbounds(module, client, items):
-    uuids = []
-    for item in items:
-        if isinstance(item, str) and is_uuid(item):
-            uuids.append(item)
-            continue
-        if isinstance(item, str):
-            profile, tag = None, item
-        elif isinstance(item, dict) and 'tag' in item:
-            profile, tag = item.get('profile'), item['tag']
-        else:
-            module.fail_json(
-                msg='Each inbound must be an inbound tag or UUID, or a dict '
-                    'with a tag key and optionally a profile key, got: %r'
-                    % (item,))
-        resolved = resolve_for_check_mode(
-            module,
-            lambda: resolve_inbound_uuids(client, profile, [tag])[1],
-            [tag if profile is None else '%s:%s' % (profile, tag)])
-        uuids.extend(resolved)
-    return uuids
 
 
 def run(module, client):
-    params = module.params
-    name = params['name']
-    current = find_internal_squad(client, name)
-
-    if params['state'] == 'absent':
-        if current is None:
-            module.exit_json(changed=False)
-        if not module.check_mode:
-            client.delete('/api/internal-squads/%s' % current['uuid'])
-        exit_with_change(module, {'name': name}, {})
-
-    tags = validate_tags(params['tags'])
-    desired_uuids = None
-    if params['inbounds'] is not None:
-        desired_uuids = resolve_inbounds(module, client, params['inbounds'])
-
-    if current is None:
-        if desired_uuids is None:
-            module.fail_json(
-                msg='inbounds is required when creating internal squad %r' % name)
-        payload = {'name': name, 'inbounds': desired_uuids}
-        after = dict(payload)
-        if tags:
-            after['tags'] = tags
-        if module.check_mode:
-            exit_with_change(module, {}, after, squad=after)
-        created = client.post('/api/internal-squads', payload)
-        # Tags are not part of the create body; they have their own endpoint.
-        if tags:
-            created = set_tags(client, 'internal-squads', created, tags)
-        exit_with_change(module, {}, after, squad=created)
-
-    before, after = {}, {}
-    current_uuids = sorted(i.get('uuid') for i in (current.get('inbounds') or []))
-    inbounds_changed = (desired_uuids is not None
-                        and sorted(set(desired_uuids)) != current_uuids)
-    if inbounds_changed:
-        before['inbounds'] = current_uuids
-        after['inbounds'] = sorted(set(desired_uuids))
-    tags_changed = tags_differ(tags, current.get('tags'))
-    if tags_changed:
-        before['tags'] = current.get('tags') or []
-        after['tags'] = tags
-
-    if not inbounds_changed and not tags_changed:
-        module.exit_json(changed=False, squad=current)
-    if module.check_mode:
-        exit_with_change(module, before, after, squad=current)
-
-    squad = current
-    if inbounds_changed:
-        squad = client.patch(
-            '/api/internal-squads',
-            {'uuid': current['uuid'], 'inbounds': desired_uuids})
-    if tags_changed:
-        squad = set_tags(client, 'internal-squads', squad or current, tags)
-    exit_with_change(module, before, after, squad=squad)
+    run_single(module, client, 'internal_squad')
 
 
 def main():
     argument_spec = remnawave_argument_spec()
-    argument_spec.update(
-        name=dict(type='str', required=True),
-        state=dict(type='str', choices=['present', 'absent'], default='present'),
-        inbounds=dict(type='list', elements='raw'),
-        tags=dict(type='list', elements='str'),
-    )
+    argument_spec.update(entity_options('internal_squad'))
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     client = RemnawaveClient(module)

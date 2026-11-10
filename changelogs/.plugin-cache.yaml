@@ -34,6 +34,11 @@ plugins:
       name: external_squad_info
       namespace: ''
       version_added: null
+    external_squads:
+      description: Manage many Remnawave external squads
+      name: external_squads
+      namespace: ''
+      version_added: null
     host:
       description: Manage Remnawave subscription hosts
       name: host
@@ -74,6 +79,11 @@ plugins:
       name: internal_squad_info
       namespace: ''
       version_added: null
+    internal_squads:
+      description: Manage many Remnawave internal squads
+      name: internal_squads
+      namespace: ''
+      version_added: null
     node:
       description: Manage Remnawave nodes
       name: node
@@ -89,6 +99,21 @@ plugins:
       name: nodes
       namespace: ''
       version_added: 1.3.0
+    response_rule:
+      description: Manage Remnawave subscription response rule
+      name: response_rule
+      namespace: ''
+      version_added: null
+    response_rule_info:
+      description: Retrieve Remnawave rules
+      name: response_rule_info
+      namespace: ''
+      version_added: null
+    response_rules:
+      description: Manage Remnawave subscription response rules
+      name: response_rules
+      namespace: ''
+      version_added: null
     snippet:
       description: Manage Remnawave snippets
       name: snippet
@@ -102,6 +127,21 @@ plugins:
     subscription_settings:
       description: Manage Remnawave subscription settings
       name: subscription_settings
+      namespace: ''
+      version_added: null
+    subscription_template:
+      description: Manage Remnawave subscription templates
+      name: subscription_template
+      namespace: ''
+      version_added: null
+    subscription_template_info:
+      description: Retrieve Remnawave templates
+      name: subscription_template_info
+      namespace: ''
+      version_added: null
+    subscription_templates:
+      description: Manage many Remnawave subscription templates
+      name: subscription_templates
       namespace: ''
       version_added: null
     system_info:
@@ -123,4 +163,4 @@ plugins:
   shell: {}
   strategy: {}
   vars: {}
-version: 1.5.0
+version: 1.6.0

@@ -1,0 +1,249 @@
+---
+- name: Exercise squads, subscription templates and response rules
+  hosts: localhost
+  gather_facts: false
+  vars:
+    template_entries:
+      - name: custom-json
+        template_type: XRAY_JSON
+        template_json: {outbounds: []}
+        tags: [PAID]
+      - name: custom-mihomo
+        template_type: MIHOMO
+        template_yaml: "proxies: []\n"
+    squad_entries:
+      - name: custom-external
+        templates: [custom-json, custom-mihomo]
+        subscription_settings: {randomize_hosts: true}
+        host_overrides: {server_description: custom, vless_route_id: 42}
+        response_headers_add: {X-Custom: value}
+        response_headers_remove: [X-Remove]
+        hwid_settings: {enabled: true, fallbackDeviceLimit: 3, maxDevicesAnnounce: null}
+    rule_entries:
+      - name: custom-mihomo-rule
+        response_type: MIHOMO
+        conditions:
+          - header_name: user-agent
+            operator: CONTAINS
+            value: Mihomo
+        response_modifications: {subscriptionTemplate: custom-mihomo}
+      - name: custom-block-rule
+        response_type: BLOCK
+  module_defaults:
+    group/kenyawest.remnawave.remnawave:
+      panel_url: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+      token: test-token
+      api_key: sekret
+  tasks:
+    - name: Predict templates
+      kenyawest.remnawave.subscription_templates:
+        templates: "{{ template_entries }}"
+      check_mode: true
+      register: predicted
+
+    - name: Templates were not created
+      kenyawest.remnawave.subscription_template_info:
+        name: custom-json
+      register: empty
+
+    - ansible.builtin.assert:
+        that:
+          - predicted is changed
+          - empty.templates | length == 0
+
+    - name: Create templates
+      kenyawest.remnawave.subscription_templates:
+        templates: "{{ template_entries }}"
+      register: created
+
+    - name: Repeat template declaration
+      kenyawest.remnawave.subscription_templates:
+        templates: "{{ template_entries }}"
+      register: again
+
+    - ansible.builtin.assert:
+        that:
+          - created is changed
+          - "created.results[0].template.templateJson == {'outbounds': []}"
+          - 'created.results[1].template.encodedTemplateYaml | b64decode == "proxies: []\n"'
+          - again is not changed
+
+    - name: Reject duplicate template without applying earlier update
+      kenyawest.remnawave.subscription_templates:
+        templates:
+          - name: custom-json
+            template_json: {outbounds: [changed]}
+          - name: "{{ created.results[0].template.uuid }}"
+      ignore_errors: true
+      register: duplicate
+
+    - name: Read content after refusal
+      kenyawest.remnawave.subscription_template_info:
+        name: custom-json
+      register: unchanged
+
+    - ansible.builtin.assert:
+        that:
+          - duplicate is failed
+          - "unchanged.templates[0].templateJson == {'outbounds': []}"
+
+    - name: Create external squad with all overrides
+      kenyawest.remnawave.external_squads:
+        squads: "{{ squad_entries }}"
+      register: external_created
+
+    - name: Repeat external declaration
+      kenyawest.remnawave.external_squads:
+        squads: "{{ squad_entries }}"
+      register: external_again
+
+    - ansible.builtin.assert:
+        that:
+          - external_created is changed
+          - external_created.results[0].squad.templates | length == 2
+          - external_again is not changed
+
+    - name: Patch one nested setting
+      kenyawest.remnawave.external_squad:
+        name: custom-external
+        subscription_settings: {show_custom_remarks: true}
+      register: nested
+
+    - name: Clear overrides
+      kenyawest.remnawave.external_squad:
+        name: custom-external
+        templates: []
+        hwid_settings: 'null'
+        host_overrides: {server_description: '', vless_route_id: ''}
+      register: cleared
+
+    - ansible.builtin.assert:
+        that:
+          - nested.squad.subscriptionSettings.randomizeHosts
+          - cleared.squad.templates == []
+          - cleared.squad.hwidSettings == None
+          - cleared.squad.hostOverrides.vlessRouteId == None
+
+    - name: Create internal squads
+      kenyawest.remnawave.internal_squads:
+        squads:
+          - {name: custom-internal-a, inbounds: [], tags: [PAID]}
+          - {name: custom-internal-b, inbounds: []}
+
+    - name: Reverse squad order
+      kenyawest.remnawave.internal_squads:
+        squads:
+          - {name: custom-internal-b}
+          - {name: custom-internal-a}
+      register: moved
+
+    - name: Repeat order
+      kenyawest.remnawave.internal_squads:
+        squads:
+          - {name: custom-internal-b}
+          - {name: custom-internal-a}
+      register: moved_again
+
+    - ansible.builtin.assert:
+        that:
+          - moved is changed
+          - moved_again is not changed
+          - moved.results[0].squad.viewPosition < moved.results[1].squad.viewPosition
+
+    - name: Set response config settings
+      kenyawest.remnawave.subscription_settings:
+        response_rules:
+          version: '1'
+          settings: {disableSubscriptionAccessByPath: true}
+          rules: []
+
+    - name: Create rules
+      kenyawest.remnawave.response_rules:
+        rules: "{{ rule_entries }}"
+      register: rules_created
+
+    - name: Repeat rules
+      kenyawest.remnawave.response_rules:
+        rules: "{{ rule_entries }}"
+      register: rules_again
+
+    - name: Disable one rule
+      kenyawest.remnawave.response_rule:
+        name: custom-mihomo-rule
+        state: disabled
+
+    - name: Present preserves disabled state
+      kenyawest.remnawave.response_rule:
+        name: custom-mihomo-rule
+      register: disabled_present
+
+    - name: Read rule config
+      kenyawest.remnawave.response_rule_info:
+      register: rules_info
+
+    - ansible.builtin.assert:
+        that:
+          - rules_created is changed
+          - rules_again is not changed
+          - disabled_present is not changed
+          - not disabled_present.rule.enabled
+          - rules_info.settings.disableSubscriptionAccessByPath
+          - rules_info.rules | length == 2
+
+    - name: Refuse invalid batch without deleting its first rule
+      kenyawest.remnawave.response_rules:
+        rules:
+          - {name: custom-block-rule, state: absent}
+          - {name: invalid-new-rule}
+      register: invalid_rules
+      ignore_errors: true
+
+    - name: Still present after refusal
+      kenyawest.remnawave.response_rule_info:
+        name: custom-block-rule
+      register: block
+
+    - ansible.builtin.assert:
+        that:
+          - invalid_rules is failed
+          - block.rules | length == 1
+
+    - name: Verify role integration and gather
+      ansible.builtin.include_role:
+        name: kenyawest.remnawave.remnawave
+      vars:
+        remnawave_panel_url: "http://127.0.0.1:{{ mock_port | default(18443) }}"
+        remnawave_token: test-token
+        remnawave_api_key: sekret
+        remnawave_subscription_templates: "{{ template_entries }}"
+        remnawave_response_rules: "{{ rule_entries }}"
+        remnawave_gather:
+          subscription_templates: {name: custom-json}
+          response_rules: {name: custom-block-rule}
+
+    - ansible.builtin.assert:
+        that:
+          - remnawave_gathered.subscription_templates | length == 1
+          - remnawave_gathered.response_rules | length == 1
+
+    - name: Delete rules
+      kenyawest.remnawave.response_rules:
+        rules:
+          - {name: custom-block-rule, state: absent}
+          - {name: custom-mihomo-rule, state: absent}
+
+    - name: Delete external squads
+      kenyawest.remnawave.external_squads:
+        squads: [{name: custom-external, state: absent}]
+
+    - name: Delete internal squads
+      kenyawest.remnawave.internal_squads:
+        squads:
+          - {name: custom-internal-a, state: absent}
+          - {name: custom-internal-b, state: absent}
+
+    - name: Delete templates
+      kenyawest.remnawave.subscription_templates:
+        templates:
+          - {name: custom-json, state: absent}
+          - {name: custom-mihomo, state: absent}

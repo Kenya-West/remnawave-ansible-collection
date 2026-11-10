@@ -37,6 +37,10 @@ Consequences:
   `module_utils/infra_provider.py` - the options of a host, a node and an
   infra provider, and planning and applying one entity's change, shared by
   the single-entity module and its batch module.
+- `module_utils/squad.py` - shared squad and subscription template planning,
+  including follow-up content/settings and tags writes.
+- `module_utils/response_rule.py` - named-rule reconciliation within the
+  subscription-settings singleton.
 - `module_utils/batch.py` - what the batch modules share in writing: running
   writes concurrently and putting a batch in list order.
 - `plugins/modules/*` - one file per resource; mostly declarative field
@@ -160,6 +164,28 @@ names. `hosts` exists for that case only: it is `host` taking a list, not a
 different model. Its entries are the options of `host`, and both modules go
 through the same planning and applying code, so the two cannot drift apart.
 `nodes` is the same to `node`, and `infra_providers` to `infra_provider`.
+`internal_squads`, `external_squads` and `subscription_templates` share their
+single-entity planning with their batch modules in `module_utils/squad.py`.
+Their reorder DTO uses `items`, unlike the hosts and nodes DTOs.
+Subscription template listings deliberately omit content, so comparison and
+info modules fetch the per-UUID detail before reporting or managing content.
+
+## Named response rules
+
+Response rules are entries of the subscription-settings singleton, not
+independent API resources. `response_rule` patches one named entry and
+`response_rules` plans a list before sending one PATCH of the resulting
+configuration. Both preserve unlisted rules and configuration-level settings;
+conditions and response modifications are authoritative when supplied.
+Names must be unambiguous. New rules append, and the batch optionally arranges
+listed rules among their slots, since evaluation is first-match-wins.
+The API has no concurrency control for this read/modify/write operation, so
+concurrent configuration writers must be avoided. The role rejects declaring
+both named rules and the whole response-rule configuration in one run.
+Template overrides within response modifications are names, not UUIDs, because
+that is the panel's own contract.
+
+## Batch guarantees
 
 The rules a batch follows:
 

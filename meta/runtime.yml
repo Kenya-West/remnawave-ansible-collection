@@ -8,6 +8,7 @@ action_groups:
     - config_profile_info
     - external_squad
     - external_squad_info
+    - external_squads
     - host
     - hosts
     - host_info
@@ -16,11 +17,18 @@ action_groups:
     - infra_providers
     - internal_squad
     - internal_squad_info
+    - internal_squads
     - node
     - node_info
     - nodes
     - snippet
     - snippet_info
+    - response_rule
+    - response_rule_info
+    - response_rules
+    - subscription_template
+    - subscription_template_info
+    - subscription_templates
     - subscription_settings
     - system_info
     - user

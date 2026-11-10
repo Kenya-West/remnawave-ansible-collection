@@ -44,14 +44,16 @@ reference names created by the previous ones:
 
 1. snippets (`remnawave_snippets`)
 2. config profiles (`remnawave_config_profiles`)
-3. internal squads (`remnawave_internal_squads`)
-4. external squads (`remnawave_external_squads`)
-5. infra billing providers (`remnawave_infra_providers`)
-6. nodes (`remnawave_nodes`)
-7. hosts (`remnawave_hosts`)
-8. users (`remnawave_users`)
-9. subscription settings (`remnawave_subscription_settings`)
-10. reading entities back (`remnawave_gather`), see
+3. subscription templates (`remnawave_subscription_templates`)
+4. internal squads (`remnawave_internal_squads`)
+5. external squads (`remnawave_external_squads`)
+6. infra billing providers (`remnawave_infra_providers`)
+7. nodes (`remnawave_nodes`)
+8. hosts (`remnawave_hosts`)
+9. users (`remnawave_users`)
+10. subscription settings (`remnawave_subscription_settings`)
+11. named response rules (`remnawave_response_rules`)
+12. reading entities back (`remnawave_gather`), see
    [Reading entities back](#reading-entities-back)
 
 Each stage is skipped when its variable is empty, which is the default. So a
@@ -67,12 +69,13 @@ panel URL, so the play normally runs on `localhost` (or on any host with
 network access to the panel). Prefer `localhost`: against a remote host every
 task goes over SSH, which costs seconds per task.
 
-Infra providers, nodes and hosts are applied in a single
-`kenyawest.remnawave.infra_providers`, `kenyawest.remnawave.nodes` and
-`kenyawest.remnawave.hosts` task each rather than a loop, so each stage reads
-the panel once however many entries it declares, writes several at a time,
-and fails over a bad entry before anything is written. Both arrange the panel
-in the order of `remnawave_nodes` and `remnawave_hosts`.
+Squads, templates, response rules, infra providers, nodes and hosts use batch
+modules rather than loops. Entries are planned before writing, and unlisted
+entities are preserved. Squads, templates, nodes and hosts are arranged in
+input order; response rules likewise follow their declared evaluation order.
+Do not combine `remnawave_response_rules` with
+`remnawave_subscription_settings.response_rules`: the role rejects that
+conflict before changing anything.
 
 ## Requirements
 
@@ -108,6 +111,8 @@ the play - the modules fall back to them.
 | --- | --- | --- | --- |
 | `remnawave_snippets` | list of dict | `[]` | `kenyawest.remnawave.snippet` |
 | `remnawave_config_profiles` | list of dict | `[]` | `kenyawest.remnawave.config_profile` |
+| `remnawave_subscription_templates` | list of dict | `[]` | `kenyawest.remnawave.subscription_template` |
+| `remnawave_response_rules` | list of dict | `[]` | `kenyawest.remnawave.response_rule` |
 | `remnawave_internal_squads` | list of dict | `[]` | `kenyawest.remnawave.internal_squad` |
 | `remnawave_external_squads` | list of dict | `[]` | `kenyawest.remnawave.external_squad` |
 | `remnawave_infra_providers` | list of dict | `[]` | `kenyawest.remnawave.infra_provider` |
@@ -146,6 +151,33 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | `config` | dict or JSON str | The Xray configuration. Authoritative: the panel's stored config is made exactly equal to it. Required when the profile does not exist yet. |
 | `tags` | list of str | Authoritative when set. See [tag format](#behaviour-worth-knowing). |
 
+**`remnawave_subscription_templates`** - named templates, applied before
+external squads and response rules.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `name` | str | Required. Name or UUID; new names are 2 to 255 characters. |
+| `state` | str | `present` (default) or `absent`. |
+| `template_type` | str | Required on creation, immutable afterwards: `XRAY_JSON`, `XRAY_BASE64`, `MIHOMO`, `STASH`, `CLASH`, `SINGBOX`. |
+| `template_json` | dict or JSON str | Authoritative JSON object; mutually exclusive with `template_yaml`. |
+| `template_yaml` | str | Authoritative plain-text YAML; encoded to base64 automatically. |
+| `tags` | list of str | Authoritative when set. |
+
+**`remnawave_response_rules`** - named rules, in first-match evaluation order.
+Unlisted rules and configuration settings remain unchanged. New rules default
+to enabled, `operator: AND` and empty conditions. `present` leaves an existing
+rule's enabled state alone.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `name` | str | Required unique name, 1 to 50 characters. |
+| `state` | str | `present` (default), `enabled`, `disabled`, `absent`. |
+| `description` | str | Human-readable description. |
+| `operator` | str | `AND` or `OR`. |
+| `conditions` | list of dict | Authoritative; entries have `header_name`, `operator`, `value`, and optional `case_sensitive` (default false). |
+| `response_type` | str | Required on creation. Subscription format, `BROWSER`, `BLOCK`, `STATUS_CODE_404`, `STATUS_CODE_451`, or `SOCKET_DROP`. |
+| `response_modifications` | dict or JSON str | Authoritative panel camelCase structure; `subscriptionTemplate` takes a template name. |
+
 **`remnawave_internal_squads`** - squads users are assigned to.
 
 | Key | Type | Notes |
@@ -162,6 +194,13 @@ profiles embed. Applied first, so a profile referencing one finds it in place.
 | `name` | str | Required. Identifier. |
 | `state` | str | `present` (default) or `absent`. |
 | `tags` | list of str | Authoritative when set. |
+| `templates` | list of str | Names or UUIDs, one per type; authoritative. `[]` restores defaults. |
+| `subscription_settings` | dict | Partial: `serve_json_at_base_subscription`, `show_custom_remarks`, `randomize_hosts`. |
+| `host_overrides` | dict | Partial: `server_description`, `vless_route_id`; empty strings clear them. |
+| `response_headers_add` | dict | Authoritative added response headers. |
+| `response_headers_remove` | list of str | Authoritative removed header names. |
+| `hwid_settings`, `custom_remarks` | dict or JSON str | Authoritative panel camelCase structures; JSON string `'null'` clears an override. |
+| `subpage_config_uuid` | str | Subscription page configuration UUID; empty string clears it. |
 
 **`remnawave_infra_providers`** - the hosting companies nodes run at.
 Applied before nodes, which refer to them by name.
@@ -272,6 +311,8 @@ matching info module; leave it empty (or `{}`) to read everything.
 | --- | --- | --- |
 | `snippets` | `name` (`snippet_info`) | `remnawave_gathered.snippets` |
 | `config_profiles` | `name` or `inbound` (`config_profile_info`) | `remnawave_gathered.config_profiles`, plus their inbounds with UUIDs and profile names as `remnawave_gathered.inbounds` |
+| `subscription_templates` | `name` (`subscription_template_info`) | `remnawave_gathered.subscription_templates` |
+| `response_rules` | `name` (`response_rule_info`) | `remnawave_gathered.response_rules` |
 | `internal_squads` | `name` (`internal_squad_info`) | `remnawave_gathered.internal_squads` |
 | `external_squads` | `name` (`external_squad_info`) | `remnawave_gathered.external_squads` |
 | `infra_providers` | `name` (`infra_provider_info`) | `remnawave_gathered.infra_providers`, plus the names of each provider's nodes as `remnawave_gathered.infra_provider_nodes` |

@@ -129,6 +129,8 @@ def find_internal_squad(client, name_or_uuid, required=False):
     squads = list_internal_squads(client)
     key = 'uuid' if is_uuid(name_or_uuid) else 'name'
     matches = [s for s in squads if s.get(key) == name_or_uuid]
+    if len(matches) > 1:
+        raise RemnawaveApiError('Multiple internal squads match %r' % name_or_uuid)
     if not matches:
         if required:
             raise RemnawaveApiError('Internal squad %r not found' % name_or_uuid)
@@ -161,9 +163,31 @@ def find_external_squad(client, name_or_uuid, required=False):
     squads = list_external_squads(client)
     key = 'uuid' if is_uuid(name_or_uuid) else 'name'
     matches = [s for s in squads if s.get(key) == name_or_uuid]
+    if len(matches) > 1:
+        raise RemnawaveApiError('Multiple external squads match %r' % name_or_uuid)
     if not matches:
         if required:
             raise RemnawaveApiError('External squad %r not found' % name_or_uuid)
+        return None
+    return matches[0]
+
+
+def list_subscription_templates(client):
+    data = client.get('/api/subscription-templates', cached=True)
+    return (data or {}).get('templates', [])
+
+
+def find_subscription_template(client, name_or_uuid, required=False):
+    key = 'uuid' if is_uuid(name_or_uuid) else 'name'
+    matches = [t for t in list_subscription_templates(client)
+               if t.get(key) == name_or_uuid]
+    if len(matches) > 1:
+        raise RemnawaveApiError('Multiple subscription templates match %r'
+                                % name_or_uuid)
+    if not matches:
+        if required:
+            raise RemnawaveApiError('Subscription template %r not found'
+                                    % name_or_uuid)
         return None
     return matches[0]
 
@@ -174,7 +198,7 @@ def set_tags(client, collection, entity, tags):
     Unlike nodes and hosts, these entities do not take tags in their
     create and update bodies - the panel has a dedicated endpoint per
     collection (``config-profiles``, ``internal-squads``,
-    ``external-squads``) that answers with just the uuid and the new tags.
+    ``external-squads``, ``subscription-templates``) that answers with just the uuid and the new tags.
     """
     data = client.patch('/api/%s/tags' % collection,
                         {'uuid': entity['uuid'], 'tags': tags})

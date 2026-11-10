@@ -23,6 +23,22 @@
   when: "'config_profiles' in remnawave_gather"
   register: __remnawave_gathered_config_profiles
 
+- name: Gather subscription templates
+  kenyawest.remnawave.subscription_template_info:
+    name: "{{ __remnawave_query.name | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.subscription_templates or {} }}"
+  when: "'subscription_templates' in remnawave_gather"
+  register: __remnawave_gathered_subscription_templates
+
+- name: Gather response rules
+  kenyawest.remnawave.response_rule_info:
+    name: "{{ __remnawave_query.name | default(omit) }}"
+  vars:
+    __remnawave_query: "{{ remnawave_gather.response_rules or {} }}"
+  when: "'response_rules' in remnawave_gather"
+  register: __remnawave_gathered_response_rules
+
 - name: Gather internal squads
   kenyawest.remnawave.internal_squad_info:
     name: "{{ __remnawave_query.name | default(omit) }}"
@@ -111,6 +127,10 @@
          | combine({'config_profiles': __remnawave_gathered_config_profiles.profiles,
                     'inbounds': __remnawave_gathered_config_profiles.inbounds}
                    if 'config_profiles' in remnawave_gather else {})
+         | combine({'subscription_templates': __remnawave_gathered_subscription_templates.templates}
+                   if 'subscription_templates' in remnawave_gather else {})
+         | combine({'response_rules': __remnawave_gathered_response_rules.rules}
+                   if 'response_rules' in remnawave_gather else {})
          | combine({'internal_squads': __remnawave_gathered_internal_squads.squads}
                    if 'internal_squads' in remnawave_gather else {})
          | combine({'external_squads': __remnawave_gathered_external_squads.squads}

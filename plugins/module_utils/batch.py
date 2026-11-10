@@ -43,7 +43,8 @@ def collect_outcomes(plans, groups, outcomes, record):
     return failure
 
 
-def arrange(module, client, collection, item, plans, results, listing):
+def arrange(module, client, collection, item, plans, results, listing,
+            request_key=None):
     """Put the entities of a carried-out batch in list order, in one request.
 
     ``collection`` names the panel's collection (``hosts``, ``nodes``), and
@@ -102,7 +103,7 @@ def arrange(module, client, collection, item, plans, results, listing):
 
     if moves and not module.check_mode:
         try:
-            client.post('/api/%s/actions/reorder' % collection, {collection: [
+            client.post('/api/%s/actions/reorder' % collection, {request_key or collection: [
                 {'uuid': key, 'viewPosition': target[key]} for key in moves]})
         except RemnawaveApiError as exc:
             return exc

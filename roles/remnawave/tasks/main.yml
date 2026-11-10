@@ -9,6 +9,13 @@
       timeout: "{{ remnawave_timeout }}"
       request_headers: "{{ remnawave_request_headers }}"
   block:
+    - name: Refuse conflicting response rule declarations
+      ansible.builtin.assert:
+        that:
+          - remnawave_response_rules | length == 0 or 'response_rules' not in remnawave_subscription_settings
+        fail_msg: Use remnawave_response_rules or remnawave_subscription_settings.response_rules, not both.
+        quiet: true
+
     # Snippets first: config profiles embed them, so they must exist (and be
     # up to date) before a profile referencing them is written.
     - name: Manage snippets
@@ -32,24 +39,42 @@
       loop_control:
         label: "{{ item.inbound | default(item.name | default('')) }}"
 
+    # Templates precede external squads and response rules which reference them.
+    - name: Manage subscription templates
+      kenyawest.remnawave.subscription_templates:
+        templates: "{{ remnawave_subscription_templates }}"
+      when: remnawave_subscription_templates | length > 0
+
     - name: Manage internal squads
-      kenyawest.remnawave.internal_squad:
-        name: "{{ item.name }}"
-        state: "{{ item.state | default('present') }}"
-        inbounds: "{{ item.inbounds | default(omit) }}"
-        tags: "{{ item.tags | default(omit) }}"
-      loop: "{{ remnawave_internal_squads }}"
-      loop_control:
-        label: "{{ item.name }}"
+      kenyawest.remnawave.internal_squads:
+        squads: >-
+          {{ remnawave_internal_squads
+             | map('dict2items')
+             | map('selectattr', 'key', 'in', ['name', 'state', 'inbounds', 'tags'])
+             | map('list') | map('items2dict') | list }}
+      when: remnawave_internal_squads | length > 0
 
     - name: Manage external squads
-      kenyawest.remnawave.external_squad:
-        name: "{{ item.name }}"
-        state: "{{ item.state | default('present') }}"
-        tags: "{{ item.tags | default(omit) }}"
-      loop: "{{ remnawave_external_squads }}"
-      loop_control:
-        label: "{{ item.name }}"
+      kenyawest.remnawave.external_squads:
+        squads: >-
+          {{ remnawave_external_squads
+             | map('dict2items')
+             | map('selectattr', 'key', 'in', __remnawave_external_squad_keys)
+             | map('list') | map('items2dict') | list }}
+      vars:
+        __remnawave_external_squad_keys:
+          - name
+          - state
+          - tags
+          - templates
+          - subscription_settings
+          - host_overrides
+          - response_headers_add
+          - response_headers_remove
+          - hwid_settings
+          - custom_remarks
+          - subpage_config_uuid
+      when: remnawave_external_squads | length > 0
 
     # Before the nodes, which are linked to providers by name. A provider
     # deleted here unlinks its nodes and takes its billing history along.
@@ -169,6 +194,11 @@
         response_rules: "{{ remnawave_subscription_settings.response_rules | default(omit) }}"
         hwid_settings: "{{ remnawave_subscription_settings.hwid_settings | default(omit) }}"
       when: remnawave_subscription_settings | length > 0
+
+    - name: Manage named response rules
+      kenyawest.remnawave.response_rules:
+        rules: "{{ remnawave_response_rules }}"
+      when: remnawave_response_rules | length > 0
 
     # Reads come last, so they show the panel as this run left it.
     - name: Read back entities

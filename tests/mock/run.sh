@@ -164,4 +164,12 @@ else
     exit 1
 fi
 
+if out="$(run "$HERE/squads.yml")"; then
+    echo "PASS: squads, subscription templates and response rules"
+else
+    echo "FAIL: squads, subscription templates and response rules"
+    echo "$out" | tail -80
+    exit 1
+fi
+
 echo "All mock integration checks passed."

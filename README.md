@@ -57,8 +57,10 @@ only the Python standard library.
 | `host`, `hosts`, `host_info` | Subscription hosts: address, SNI, transport parameters, VLESS route id, node binding, subscription and squad visibility. Addressable by remark or by domain (`identify_by`). `hosts` manages a whole list in one task |
 | `config_profile`, `config_profile_info` | Xray config profiles (the supplied config is authoritative). Addressable by name or by the tag of one of their inbounds; `config_profile_info` turns an inbound tag into the inbound's and the profile's UUIDs |
 | `snippet`, `snippet_info` | Reusable configuration fragments, with syncing into the profiles that embed them |
-| `internal_squad`, `internal_squad_info` | Internal squads and their inbounds |
-| `external_squad`, `external_squad_info` | External squads |
+| `internal_squad`, `internal_squads`, `internal_squad_info` | Internal squads and their inbounds; batch management with ordering |
+| `external_squad`, `external_squads`, `external_squad_info` | External squads, template assignments, subscription settings, host overrides and response headers |
+| `subscription_template`, `subscription_templates`, `subscription_template_info` | Named subscription templates with JSON or plain-text YAML content and tags |
+| `response_rule`, `response_rules`, `response_rule_info` | Named subscription response rules, enabled state, conditions, modifications and evaluation order |
 | `subscription_settings` | Panel-wide subscription settings (singleton) |
 | `system_info` | Health, statistics, metadata; doubles as a credentials check |
 | `api` | Low-level escape hatch for anything not modeled above |
@@ -70,7 +72,8 @@ the panel. List-valued options (`internal_squads`, `inbounds`, `tags`,
 
 ### Tags
 
-`config_profile`, `internal_squad`, `external_squad`, `node` and `host`
+`config_profile`, `internal_squad`, `external_squad`, `subscription_template`,
+`node` and `host`
 accept an optional `tags` list, authoritative when set and compared
 regardless of order; an empty list removes every tag. The panel allows up to
 10 tags per entity, each at most 36 characters of uppercase letters, digits,
@@ -89,7 +92,7 @@ made, and are not uppercased for you.
 
 ### The `state` property
 
-`user`, `node` and `host` share one well-known `state` property:
+`user`, `node`, `host` and `response_rule` share one well-known `state` property:
 
 | `state` | Meaning |
 | --- | --- |
@@ -99,12 +102,70 @@ made, and are not uppercased for you.
 | `absent` | The entity is deleted. |
 
 The other modules (`config_profile`, `snippet`, `internal_squad`,
-`external_squad`) have no enabled/disabled concept and accept
+`external_squad`, `subscription_template`) have no enabled/disabled concept and accept
 `present`/`absent` only.
 
 For users, the panel derives `LIMITED` (over quota) and `EXPIRED` itself.
 `state: enabled` treats those as already satisfied rather than forcing them
 back to `ACTIVE`, which the panel would undo on its next pass.
+
+### Subscription templates, external overrides and response rules
+
+Templates are addressed by name (or UUID). `template_type` is required on
+creation and cannot be changed afterwards. Set `template_json` to a dict or
+JSON object string, or `template_yaml` to plain text; YAML is base64-encoded
+for the API. Content is authoritative, and omitted content remains untouched.
+
+```yaml
+- kenyawest.remnawave.subscription_template:
+    name: custom-mihomo
+    template_type: MIHOMO
+    template_yaml: "{{ lookup('file', 'mihomo.yml') }}"
+
+- kenyawest.remnawave.external_squad:
+    name: resellers
+    templates: [custom-mihomo]
+    subscription_settings:
+      randomize_hosts: true
+    host_overrides:
+      server_description: Partner
+    response_headers_add:
+      X-Partner: reseller
+
+- kenyawest.remnawave.response_rules:
+    rules:
+      - name: mihomo-client
+        response_type: MIHOMO
+        conditions:
+          - header_name: user-agent
+            operator: CONTAINS
+            value: Mihomo
+        response_modifications:
+          subscriptionTemplate: custom-mihomo
+      - name: fallback
+        response_type: BLOCK
+```
+
+Use the usual connection options or module defaults with these examples.
+External squad template assignments allow one template per type; `[]`
+restores the defaults. Nested `subscription_settings` and `host_overrides`
+preserve omitted suboptions. Other structured overrides are authoritative;
+`hwid_settings: 'null'` and `custom_remarks: 'null'` clear those overrides.
+See `ansible-doc` for all fields.
+
+Response rules live inside the subscription-settings singleton, not in a
+separate API collection. The modules preserve other rules and configuration
+settings. Conditions use snake_case; `response_modifications` uses the
+panel's camelCase structure, including template **names**, as the API expects.
+Rules are evaluated in order, first match wins. A single new rule appends;
+`response_rules` arranges listed rules among their slots and leaves unlisted
+rules alone. `order: false` leaves the current order unchanged.
+
+`internal_squads`, `external_squads` and `subscription_templates` likewise
+manage lists, validate all entries before writing, and arrange listed entities
+by default. `parallelism` defaults to 4; `order: false` disables reordering.
+Unlisted entities are never deleted. Avoid concurrent writers to response
+rules, as the API updates their entire configuration in one PATCH.
 
 ### Addressing hosts by domain
 
@@ -340,7 +401,8 @@ through `linked_hosts`:
 The `remnawave` role applies a whole desired state described by variables
 (`remnawave_users`, `remnawave_nodes`, `remnawave_hosts`,
 `remnawave_config_profiles`, `remnawave_internal_squads`,
-`remnawave_external_squads`, `remnawave_subscription_settings`) in dependency
+`remnawave_external_squads`, `remnawave_subscription_templates`,
+`remnawave_response_rules`, `remnawave_subscription_settings`) in dependency
 order, with usage, per-entry option tables and worked examples in
 [roles/remnawave/README.md](roles/remnawave/README.md).
 

@@ -11,13 +11,11 @@ DOCUMENTATION = r'''
 module: external_squad
 short_description: Manage Remnawave external squads
 description:
-  - Create and delete external squads of a Remnawave panel, and manage
-    their tags.
-  - Squads are identified by their C(name). Users are assigned to an external
-    squad through M(kenyawest.remnawave.user).
-  - Advanced per-squad settings (templates, host overrides, response headers
-    and so on) are not modeled by this module; use
-    M(kenyawest.remnawave.api) for those.
+  - Create, update and delete external squads and their subscription overrides.
+  - Squads are identified by name or UUID. Users are assigned through
+    M(kenyawest.remnawave.user).
+  - Only supplied options are managed. Lists are authoritative; the nested
+    subscription settings and host overrides preserve omitted suboptions.
 author: Kenya-West (@Kenya-West)
 extends_documentation_fragment:
   - kenyawest.remnawave.remnawave
@@ -51,6 +49,51 @@ options:
     type: list
     elements: str
     version_added: 1.2.0
+  templates:
+    description:
+      - Subscription template names or UUIDs, at most one per template type.
+      - Authoritative when set; an empty list restores default templates.
+    type: list
+    elements: str
+  subscription_settings:
+    description: Per-squad subscription settings; omitted suboptions are preserved.
+    type: dict
+    suboptions:
+      serve_json_at_base_subscription:
+        description: Serve JSON at the base subscription URL.
+        type: bool
+      show_custom_remarks:
+        description: Show custom remarks.
+        type: bool
+      randomize_hosts:
+        description: Randomize host order.
+        type: bool
+  host_overrides:
+    description: Per-squad host overrides; omitted suboptions are preserved.
+    type: dict
+    suboptions:
+      server_description:
+        description: Server description, up to 30 characters; an empty string clears it.
+        type: str
+      vless_route_id:
+        description: VLESS route identifier as an integer; an empty string clears it.
+        type: raw
+  response_headers_add:
+    description: Additional response headers; authoritative when set.
+    type: dict
+  response_headers_remove:
+    description: Response header names to remove; authoritative when set.
+    type: list
+    elements: str
+  hwid_settings:
+    description: HWID settings in panel camelCase format, as a dict or JSON string. The JSON string C(null) clears the override.
+    type: raw
+  custom_remarks:
+    description: Custom remarks in panel camelCase format, as a dict or JSON string. The JSON string C(null) clears the override.
+    type: raw
+  subpage_config_uuid:
+    description: Subscription page configuration UUID. An empty string removes the override.
+    type: str
 seealso:
   - module: kenyawest.remnawave.external_squad_info
   - module: kenyawest.remnawave.user
@@ -79,59 +122,19 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import (
     RemnawaveApiError, RemnawaveClient,
 )
-from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
-    exit_with_change, remnawave_argument_spec, tags_differ, validate_tags,
-)
-from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources import (
-    find_external_squad, set_tags,
+from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import remnawave_argument_spec
+from ansible_collections.kenyawest.remnawave.plugins.module_utils.squad import (
+    entity_options, run_single,
 )
 
 
 def run(module, client):
-    params = module.params
-    name = params['name']
-    current = find_external_squad(client, name)
-
-    if params['state'] == 'absent':
-        if current is None:
-            module.exit_json(changed=False)
-        if not module.check_mode:
-            client.delete('/api/external-squads/%s' % current['uuid'])
-        exit_with_change(module, {'name': name}, {})
-
-    tags = validate_tags(params['tags'])
-
-    if current is None:
-        payload = {'name': name}
-        after = dict(payload)
-        if tags:
-            after['tags'] = tags
-        if module.check_mode:
-            exit_with_change(module, {}, after, squad=after)
-        created = client.post('/api/external-squads', payload)
-        # Tags are not part of the create body; they have their own endpoint.
-        if tags:
-            created = set_tags(client, 'external-squads', created, tags)
-        exit_with_change(module, {}, after, squad=created)
-
-    if not tags_differ(tags, current.get('tags')):
-        module.exit_json(changed=False, squad=current)
-
-    before = {'tags': current.get('tags') or []}
-    after = {'tags': tags}
-    if module.check_mode:
-        exit_with_change(module, before, after, squad=current)
-    updated = set_tags(client, 'external-squads', current, tags)
-    exit_with_change(module, before, after, squad=updated)
+    run_single(module, client, 'external_squad')
 
 
 def main():
     argument_spec = remnawave_argument_spec()
-    argument_spec.update(
-        name=dict(type='str', required=True),
-        state=dict(type='str', choices=['present', 'absent'], default='present'),
-        tags=dict(type='list', elements='str'),
-    )
+    argument_spec.update(entity_options('external_squad'))
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     client = RemnawaveClient(module)

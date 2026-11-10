@@ -69,6 +69,7 @@ jobs:
           tests.unit.plugins.module_utils.test_infra_provider
           tests.unit.plugins.module_utils.test_node
           tests.unit.plugins.module_utils.test_resources
+          tests.unit.plugins.module_utils.test_squad
 
   mock-integration:
     name: Mock panel integration

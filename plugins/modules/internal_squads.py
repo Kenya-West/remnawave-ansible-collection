@@ -119,12 +119,13 @@ results:
 
 from ansible.module_utils.basic import AnsibleModule
 
+from ansible_collections.kenyawest.remnawave.plugins.module_utils.batch import DEFAULT_PARALLELISM
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import (
     RemnawaveApiError, RemnawaveClient,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import remnawave_argument_spec
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.squad import (
-    DEFAULT_PARALLELISM, entity_options, run_batch,
+    entity_options, run_batch,
 )
 
 

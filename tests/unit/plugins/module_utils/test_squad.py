@@ -4,6 +4,9 @@
 
 """Squad/template planning and named response rule tests."""
 
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
 import unittest
 
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.squad import (

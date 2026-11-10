@@ -1,6 +1,7 @@
 ---
 - name: Exercise squads, subscription templates and response rules
   hosts: localhost
+  connection: local
   gather_facts: false
   vars:
     template_entries:

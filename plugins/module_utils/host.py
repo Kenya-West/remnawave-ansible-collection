@@ -35,6 +35,7 @@ from ansible_collections.kenyawest.remnawave.plugins.module_utils.resources impo
 HOST_REQUIRED_IF = [('identify_by', 'remark', ['remark']),
                     ('identify_by', 'address', ['address'])]
 
+
 def host_listings(entries):
     """The panel listings that planning these host entries reads.
 

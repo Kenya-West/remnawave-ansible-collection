@@ -10,7 +10,7 @@ DOCUMENTATION = r'''
 ---
 module: hosts
 short_description: Manage many Remnawave subscription hosts in one task
-version_added: 1.2.1
+version_added: 1.3.0
 description:
   - Create, update, enable, disable and delete a list of hosts of a Remnawave
     panel in a declarative way, in a single task.

@@ -185,8 +185,8 @@ class TestPlanHost(unittest.TestCase):
         })
 
     def test_inbound_tag_alone_names_its_config_profile(self):
-        options = dict(NEW_HOST, config_profile=None)
-        plan = self.plan(remark='Frankfurt', **options)
+        options = dict(NEW_HOST, config_profile=None, remark='Frankfurt')
+        plan = self.plan(**options)
         self.assertEqual(plan['action'], 'create')
         self.assertEqual(plan['payload']['inbound'], {
             'configProfileUuid': PROFILE_UUID,

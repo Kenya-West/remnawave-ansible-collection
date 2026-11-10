@@ -10,7 +10,7 @@ __metaclass__ = type
 import base64
 
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.batch import (
-    DEFAULT_PARALLELISM, arrange, collect_outcomes,
+    arrange, collect_outcomes,
 )
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.client import RemnawaveApiError
 from ansible_collections.kenyawest.remnawave.plugins.module_utils.common import (
